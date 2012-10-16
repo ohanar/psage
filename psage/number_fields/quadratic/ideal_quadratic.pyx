@@ -343,37 +343,38 @@ cdef class QuadraticIdeal:
     cpdef bint is_integral(self):
         return mpz_cmp_ui(mpq_denref(self.a), 1u) == 0
 
-    # TODO: fix for 1mod8
     def integral_basis(self):
-        cdef bint sqrt_disc = self.D.mod(4) != 1
+        if self._1mod8 or not self._1mod4:
+            return self.gens()
+
+        # in the case of 5mod8 we do not use an integral basis internally
         cdef NumberFieldElement_quadratic x, y
         x, y = self._new_elt(), self._new_elt()
 
+        # x = self.a*self.b
         mpz_mul(x.a, mpq_numref(self.a), self.b)
         mpz_set_ui(x.b, 0u)
         mpz_set(x.denom, mpq_denref(self.a))
 
+        # y = (self.a/2)*(sqrt(D)+
+        #                   1+2*(((self.b+1)/2)*(self.c-1)%self.b)
+        #                )
         mpz_set(y.b, mpq_numref(self.a))
-        mpz_set(y.denom, mpq_denref(self.a))
+        if mpz_sgn(self.c):
+            mpz_cdiv_q_2exp(y.a, self.b, 1u)
+            mpz_submul(y.a, self.c, y.a)
+            mpz_neg(y.a, y.a)
+            mpz_mod(y.a, y.a, self.b)
 
-        if self._1mod4:
-            if mpz_divisible_2exp_p(y.b, 1u):
-                mpz_divexact_ui(y.b, y.b, 2u)
-            else:
-                mpz_mul_2exp(y.denom, y.denom, 1u)
-            if mpz_sgn(self.c):
-                mpz_cdiv_q_2exp(y.a, self.b, 1u)
-                mpz_submul(y.a, self.c, y.a)
-                mpz_neg(y.a, y.a)
-                mpz_mod(y.a, y.a, self.b)
-
-                mpz_mul_2exp(y.a, y.a, 1u)
-                mpz_add_ui(y.a, y.a, 1u)
-                mpz_mul(y.a, y.a, y.b)
-            else:
-                mpz_set_ui(y.a, 1u)
+            mpz_mul_2exp(y.a, y.a, 1u)
+            mpz_add_ui(y.a, y.a, 1u)
         else:
-            mpz_mul(y.a, mpq_numref(self.a), self.c)
+            # in the ramified case, everything simplifies
+            mpz_set(y.a, self.b)
+        mpz_mul(y.a, mpq_numref(self.a), y.a)
+        mpz_set(y.denom, mpq_denref(self.a))
+        mpz_mul_2exp(y.denom, y.denom, 1u)
+        y._reduce_c_()
 
         return x,y
 
@@ -434,6 +435,7 @@ cdef class QuadraticIdeal:
 
         if self._1mod8:
             # y = self.a*(X+self.c)
+            #   = self.a*(sqrt(D)+1+2*self.c)/2
             mpz_mul_2exp(y.a, self.c, 1u)
             mpz_add_ui(y.a, y.a, 1u)
             mpz_set(y.b, mpq_numref(self.a))
