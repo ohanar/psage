@@ -86,7 +86,7 @@ ext_modules = [
 
     Extension("psage.modform.jacobiforms.jacobiformd1nn_fourierexpansion_cython",
               ["psage/modform/jacobiforms/jacobiformd1nn_fourierexpansion_cython.pyx"]),
-    
+
     Extension("psage.modform.paramodularforms.siegelmodularformg2_misc_cython",
               ["psage/modform/paramodularforms/siegelmodularformg2_misc_cython.pyx"]),
 
@@ -156,6 +156,11 @@ ext_modules = [
     Extension("psage.number_fields.sqrt5.prime",
               ["psage/number_fields/sqrt5/prime.pyx"],
               libraries = ['pari']),
+
+    Extension("psage.number_fields.quadratic.ideal_quadratic",
+              ["psage/number_fields/quadratic/ideal_quadratic.pyx"],
+              language = 'c++',
+              libraries = ['gmp']),
 
     Extension("psage.modform.rational.special_fast",
               ["psage/modform/rational/special_fast.pyx", SAGE_ROOT + "/devel/sage/sage/libs/flint/fmpq_poly.c"],
