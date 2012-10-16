@@ -8,12 +8,12 @@
 #  it under the terms of the GNU General Public License as published by
 #  the Free Software Foundation, either version 3 of the License, or
 #  (at your option) any later version.
-# 
+#
 #  PSAGE is distributed in the hope that it will be useful,
 #  but WITHOUT ANY WARRANTY; without even the implied warranty of
 #  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #  GNU General Public License for more details.
-# 
+#
 #  You should have received a copy of the GNU General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -21,8 +21,6 @@
 
 include 'gmp.pxi'
 include 'stdsage.pxi'
-
-from sage.rings.number_field.number_field_element_quadratic cimport NumberFieldElement_quadratic
 
 cdef mpz_t mpz_tmp0, mpz_tmp1, mpz_tmp2, mpz_tmp3
 mpz_init(mpz_tmp0); mpz_init(mpz_tmp1); mpz_init(mpz_tmp2); mpz_init(mpz_tmp3)
@@ -79,7 +77,7 @@ cdef class QuadraticIdeal:
     cdef QuadraticIdeal _new(self):
         '''
         Constructs a new fractional ideal over self._ring. Be careful
-        self.a, self.b, self.c aren't set by this method.
+        the ideal doesn't yet have initialized values.
         '''
         cdef QuadraticIdeal res = PY_NEW(QuadraticIdeal)
         res._ring = self._ring
@@ -90,6 +88,21 @@ cdef class QuadraticIdeal:
             res.F = self.F
         return res
 
+    cdef NumberFieldElement_quadratic _new_elt(self):
+        '''
+        Constructs a new element of self._ring. Be careful, the
+        element doesn't yet have initialized values.
+        '''
+        cdef NumberFieldElement_quadratic res
+        res = PY_NEW(NumberFieldElement_quadratic)
+        res._parent = self._ring
+        res.D = self.D
+        return res
+
+    # methods to be inherited
+    def ring(self):
+        return self._ring
+
     def __repr__(self):
         cdef Rational t = PY_NEW(Rational)
         cdef Integer T = PY_NEW(Integer)
@@ -98,10 +111,6 @@ cdef class QuadraticIdeal:
         s = '('+T.str() + ', x + '
         mpz_set(T.value, self.c)
         return t.str()+s+T.str()+')'
-
-    # methods to be inherited
-    def ring(self):
-        return self._ring
 
     def __mul__(left, right):
         return left._mul_(right)
@@ -338,11 +347,7 @@ cdef class QuadraticIdeal:
     def integral_basis(self):
         cdef bint sqrt_disc = self.D.mod(4) != 1
         cdef NumberFieldElement_quadratic x, y
-        x = PY_NEW(NumberFieldElement_quadratic)
-        y = PY_NEW(NumberFieldElement_quadratic)
-
-        x._parent, y._parent = self._ring, self._ring
-        x.D, y.D = self.D, self.D
+        x, y = self._new_elt(), self._new_elt()
 
         mpz_mul(x.a, mpq_numref(self.a), self.b)
         mpz_set_ui(x.b, 0u)
@@ -379,7 +384,7 @@ cdef class QuadraticIdeal:
 #        other = x
 #
 #        # a*b in me
-#        # 
+#        #
 #        if not mpz_divides_p():
 #            return False
 
@@ -416,6 +421,30 @@ cdef class QuadraticIdeal:
         else: # split/ramified case
             mpz_set(check.value, self.b)
             return check.is_prime(proof=proof)
+
+    def gens(self):
+        cdef NumberFieldElement_quadratic x, y
+        x, y = self._new_elt(), self._new_elt()
+
+        # x = self.a*self.b
+        mpz_mul(x.a, mpq_numref(self.a), self.b)
+        mpz_set_ui(x.b, 0u)
+        mpz_set(x.denom, mpq_denref(self.a))
+        x._reduce_c_()
+
+        if self._1mod8:
+            # y = self.a*(X+self.c)
+            mpz_mul_2exp(y.a, self.c, 1u)
+            mpz_add_ui(y.a, y.a, 1u)
+            mpz_set(y.b, mpq_numref(self.a))
+            mpz_mul_2exp(y.denom, mpq_denref(self.a), 1u)
+            y._reduce_c_()
+        else:
+            # y = self.a*(sqrt(D)+self.c)
+            mpz_mul(y.a, mpq_numref(self.a), self.c)
+            mpz_set(y.b, mpq_numref(self.a))
+            mpz_set(y.denom, mpq_denref(self.a))
+        return x,y
 
 #    def gen_tuple(self):
 #        try:
