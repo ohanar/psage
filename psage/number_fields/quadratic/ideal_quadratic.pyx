@@ -415,11 +415,28 @@ cdef class QuadraticIdeal:
             # both not inert and not split, so not prime
             return False
         # we piggy back off of Integer's is_prime
-        cdef Integer check = PY_NEW(Integer)
+        cdef Integer check
         if inert:
+            # we are in the case of I=(a), so first check if
+            # we have splitting by using the kronecker symbol
+            if mpz_divisible_2exp_p(mpq_numref(self.a), 1u):
+                # even things break the kronecker, so deal
+                # with them separately
+                if mpz_cmp_ui(mpq_numref(self.a), 2u):
+                    # not 2, so done
+                    return False
+                mpz_mod_ui(mpz_tmp0, self.D.value, 8u)
+                if mpz_cmp_ui(mpz_tmp0, 5u):
+                    return False
+                return True
+            elif mpz_kronecker(self.D.value, mpq_numref(self.a)) > -1:
+                return False
+            # no splitting, so make check to see if a is prime over ZZ
+            check = PY_NEW(Integer)
             mpz_set(check.value, mpq_numref(self.a))
             return check.is_prime(proof=proof)
         else: # split/ramified case
+            check = PY_NEW(Integer)
             mpz_set(check.value, self.b)
             return check.is_prime(proof=proof)
 
