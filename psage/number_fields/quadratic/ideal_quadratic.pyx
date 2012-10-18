@@ -25,6 +25,12 @@ include 'stdsage.pxi'
 cdef mpz_t mpz_tmp0, mpz_tmp1, mpz_tmp2, mpz_tmp3
 mpz_init(mpz_tmp0); mpz_init(mpz_tmp1); mpz_init(mpz_tmp2); mpz_init(mpz_tmp3)
 
+cdef Integer int_tmp0, int_tmp1
+int_tmp0 = PY_NEW(Integer); int_tmp1 = PY_NEW(Integer)
+
+cdef Rational rat_tmp
+rat_tmp = PY_NEW(Rational)
+
 cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
     # p is assumed to be an odd prime
     # b is assumed to have a square root modulo p
@@ -368,13 +374,10 @@ cdef class QuadraticIdeal:
         return mpz_cmp(left.c, right.c)
 
     def __hash__(self):
-        cdef Rational a
-        cdef Integer b,c
-        a = PY_NEW(Rational)
-        b = PY_NEW(Integer); c = PY_NEW(Integer)
-        mpq_set(a.value, self.a)
-        mpz_set(b.value, self.b); mpz_set(c.value, self.c)
-        return hash((a,b,c))
+        mpq_set(rat_tmp.value, self.a)
+        mpz_set(int_tmp0.value, self.b)
+        mpz_set(int_tmp1.value, self.c)
+        return hash((rat_tmp,int_tmp0,int_tmp1))
 
     cpdef QuadraticIdeal __copy__(self):
         cdef QuadraticIdeal res = self._new()
@@ -484,21 +487,20 @@ cdef class QuadraticIdeal:
     def factor(self):
         # we piggy back off of integer factorization
         cdef QuadraticIdeal tmp
-        cdef Integer helper, p
+        cdef Integer p
         cdef dict f_dict = {}
         cdef bint inert
-        helper = PY_NEW(Integer)
-        mpz_set(helper.value, self.b)
-        for p, e in helper.factor():
+        mpz_set(int_tmp0.value, self.b)
+        for p, e in int_tmp0.factor():
             tmp = self._new()
             mpq_set_ui(tmp.a, 1u, 1u)
             mpz_set(tmp.b, p.value)
             mpz_mod(tmp.c, self.c, tmp.b)
             f_dict[tmp] = e
-        mpz_set(helper.value, mpq_numref(self.a))
-        h_factor = dict(helper.factor())
-        mpz_set(helper.value, mpq_denref(self.a))
-        for p, e in helper.factor():
+        mpz_set(int_tmp0.value, mpq_numref(self.a))
+        h_factor = dict(int_tmp0.factor())
+        mpz_set(int_tmp0.value, mpq_denref(self.a))
+        for p, e in int_tmp0.factor():
             if p in h_factor:
                 h_factor[p] -= e
             else:
@@ -587,8 +589,6 @@ cdef class QuadraticIdeal:
         if not (split or inert):
             # both not inert and not split, so not prime
             return False
-        # we piggy back off of Integer's is_prime
-        cdef Integer check
         if inert:
             # we are in the case of I=(a), so first check if
             # we have splitting by using the kronecker symbol
@@ -604,14 +604,13 @@ cdef class QuadraticIdeal:
                 return False
             elif mpz_kronecker(self.D.value, mpq_numref(self.a)) > -1:
                 return False
+
             # no splitting, so make check to see if a is prime over ZZ
-            check = PY_NEW(Integer)
-            mpz_set(check.value, mpq_numref(self.a))
-            return check.is_prime(proof=proof)
+            mpz_set(int_tmp0.value, mpq_numref(self.a))
         else: # split/ramified case
-            check = PY_NEW(Integer)
-            mpz_set(check.value, self.b)
-            return check.is_prime(proof=proof)
+            mpz_set(int_tmp0.value, self.b)
+        # we piggy back off of Integer's is_prime
+        return int_tmp0.is_prime(proof=proof)
 
     def gens(self):
         cdef NumberFieldElement_quadratic x, y
