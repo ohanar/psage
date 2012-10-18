@@ -482,7 +482,6 @@ cdef class QuadraticIdeal:
 #        return True
 
     def factor(self):
-        from sage.structure.factorization import Factorization
         # we piggy back off of integer factorization
         cdef QuadraticIdeal tmp
         cdef Integer helper, p
@@ -497,10 +496,14 @@ cdef class QuadraticIdeal:
             mpz_mod(tmp.c, self.c, tmp.b)
             f_dict[tmp] = e
         mpz_set(helper.value, mpq_numref(self.a))
-        h_factor = helper.factor()
+        h_factor = dict(helper.factor())
         mpz_set(helper.value, mpq_denref(self.a))
-        h_factor *= Factorization([(p,-e) for p,e in helper.factor()])
-        for p, e in h_factor:
+        for p, e in helper.factor():
+            if p in h_factor:
+                h_factor[p] -= e
+            else:
+                h_factor[p] = -e
+        for p, e in h_factor.iteritems():
             # use the legendre symbol to determine whether or not p splits
             if not mpz_tstbit(p.value, 0u):
                 # 2 breaks the legendre symbol, so deal with it separately
@@ -567,6 +570,8 @@ cdef class QuadraticIdeal:
 
         f_list = f_dict.items()
         f_list.sort()
+
+        from sage.structure.factorization import Factorization
         return Factorization(f_list)
 
     def is_prime(self, proof=None):
