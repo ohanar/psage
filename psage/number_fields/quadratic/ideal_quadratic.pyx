@@ -30,18 +30,15 @@ cdef class QuadraticIdeal:
     # currently is just constructed from sage ideal (using integral basis)
         self._ring = I.ring()
         self.D = <Integer>self._ring._D
-        if self.D.mod(8) == 1:
-            self._1mod4 = self._1mod8 = True
+        self._1mod4 = mpz_tstbit(self.D.value, 0u) \
+                and not mpz_tstbit(self.D.value, 1u)
+        self._1mod8 = self._1mod4 and not mpz_tstbit(self.D.value, 2u)
+        if self._1mod8:
             try:
                 self.F = <Integer>self._ring._F
             except AttributeError:
                 self._ring._F = (self.D-1)/4
                 self.F = <Integer>self._ring._F
-        elif self.D.mod(4) == 1:
-            self._1mod4 = True
-            self._1mod8 = False
-        else:
-            self._1mod4 = self._1mod8 = False
 
         cdef NumberFieldElement_quadratic a, b
         a,b = I.integral_basis()
@@ -56,6 +53,7 @@ cdef class QuadraticIdeal:
             # in this case, we know that the denominators should be equal
             assert not mpz_cmp(a.denom, b.denom)
             mpz_set(mpq_denref(self.a), a.denom)
+            # we also know that b.b should divide both a.a and b.a
             assert mpz_divisible_p(a.a, b.b) and mpz_divisible_p(b.a, b.b)
             mpz_set(mpq_numref(self.a), b.b)
             mpz_divexact(self.b, a.a, b.b)
@@ -419,16 +417,16 @@ cdef class QuadraticIdeal:
         if inert:
             # we are in the case of I=(a), so first check if
             # we have splitting by using the kronecker symbol
-            if mpz_divisible_2exp_p(mpq_numref(self.a), 1u):
+            if not mpz_tstbit(mpq_numref(self.a), 0u):
                 # even things break the kronecker, so deal
                 # with them separately
                 if mpz_cmp_ui(mpq_numref(self.a), 2u):
                     # not 2, so done
                     return False
-                mpz_mod_ui(mpz_tmp0, self.D.value, 8u)
-                if mpz_cmp_ui(mpz_tmp0, 5u):
-                    return False
-                return True
+                if self._1mod4 and not self._1mod8:
+                    # D = 5mod8, the only case (2) is prime
+                    return True
+                return False
             elif mpz_kronecker(self.D.value, mpq_numref(self.a)) > -1:
                 return False
             # no splitting, so make check to see if a is prime over ZZ
