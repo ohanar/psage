@@ -53,7 +53,38 @@ cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
         mpz_mod(r, r, p)
         return
 
-    # TODO: implement Shanks-Tonelli for 1mod8
+    if mpz_tstbit(p, 3u):
+        # 9mod16 case
+        mpz_mul_2exp(r, b, 1u)
+        mpz_sub_ui(mpz_tmp3, p, 9u)
+        mpz_fdiv_q_2exp(mpz_tmp3, mpz_tmp3, 4u)
+        mpz_powm(mpz_tmp0, r, mpz_tmp3, p)
+        mpz_powm_ui(mpz_tmp1, mpz_tmp0, 2u, p)
+        mpz_mul(mpz_tmp1, r, mpz_tmp1)
+
+        mpz_powm_ui(mpz_tmp2, mpz_tmp1, 2u, p)
+
+        if not mpz_cmp_ui(mpz_tmp2, 1u):
+            # find a quadratic non-residue
+            mpz_set_ui(r, 2u)
+            while mpz_legendre(r, p) != -1:
+                mpz_add_ui(r, r, 1u)
+
+            # mpz_tmp0 *= r**(p-1)/8
+            # mpz_tmp1 *= r**(p-1)/4
+            mpz_mul_2exp(mpz_tmp3, mpz_tmp3, 1u)
+            mpz_add_ui(mpz_tmp3, mpz_tmp3, 1u)
+            mpz_powm(r, r, mpz_tmp3, p)
+            mpz_mul(mpz_tmp0, mpz_tmp0, r)
+            mpz_powm_ui(r, r, 2u, p)
+            mpz_mul(mpz_tmp1, mpz_tmp1, r)
+
+        mpz_mul(r, mpz_tmp0, b)
+        mpz_submul(r, r, mpz_tmp1)
+        mpz_mod(r, r, p)
+        return
+
+    # TODO: implement Shanks-Tonelli for 1mod16
     raise NotImplementedError('Shanks-Tonelli not yet implemented')
 
 cdef class QuadraticIdeal:
