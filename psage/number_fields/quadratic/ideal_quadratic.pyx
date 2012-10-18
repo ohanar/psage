@@ -528,7 +528,7 @@ cdef class QuadraticIdeal:
             if not mpz_tstbit(p.value, 0u):
                 # like usual, arithmetic for 2 is a bit off
                 # thankfully it is easy in this case
-                mpz_set_ui(tmp.c, 1u)
+                mpz_set_ui(tmp.c, mpz_tstbit(self.D.value, 0u))
             else:
                 mpz_sqrtm(tmp.c, self.D.value, tmp.b)
                 if self._1mod8:
