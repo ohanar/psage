@@ -25,6 +25,36 @@ include 'stdsage.pxi'
 cdef mpz_t mpz_tmp0, mpz_tmp1, mpz_tmp2, mpz_tmp3
 mpz_init(mpz_tmp0); mpz_init(mpz_tmp1); mpz_init(mpz_tmp2); mpz_init(mpz_tmp3)
 
+cdef void mpz_sqrtm(mpz_t rop, mpz_t op1, mpz_t op2):
+    # op2 is assumed to be an odd prime
+    # op1 is assumed to have a square root modulo op2
+
+    if mpz_divisible_p(op1, op2):
+        mpz_set_ui(rop, 0u)
+        return
+
+    if mpz_tstbit(op2, 1u):
+        # 3mod4 case
+        mpz_add_ui(rop, op2, 1u)
+        mpz_fdiv_q_2exp(rop, rop, 2u)
+        mpz_powm(rop, op1, rop, op2)
+        return
+
+    if mpz_tstbit(op2, 2u):
+        # 5mod8 case
+        mpz_mul_2exp(rop, op1, 1u)
+        mpz_sub_ui(mpz_tmp0, op2, 5u)
+        mpz_fdiv_q_2exp(mpz_tmp0, mpz_tmp0, 3u)
+        mpz_powm(mpz_tmp0, rop, mpz_tmp0, op2)
+        mpz_powm_ui(mpz_tmp1, mpz_tmp0, 2u, op2)
+        mpz_mul(mpz_tmp1, rop, mpz_tmp1)
+        mpz_mul(rop, mpz_tmp0, op1)
+        mpz_submul(rop, rop, mpz_tmp1)
+        mpz_mod(rop, rop, op2)
+        return
+
+    raise NotImplementedError
+
 cdef class QuadraticIdeal:
     def __init__(self, I):
     # currently is just constructed from sage ideal (using integral basis)
@@ -421,9 +451,91 @@ cdef class QuadraticIdeal:
 
     def factor(self):
         from sage.structure.factorization import Factorization
-        if self.is_prime():
-            return Factorization([(self.__copy__(),1)])
-        raise NotImplementedError
+        # we piggy back off of integer factorization
+        cdef QuadraticIdeal tmp
+        cdef Integer helper, p
+        cdef dict f_dict = {}
+        cdef bint inert
+        helper = PY_NEW(Integer)
+        mpz_set(helper.value, self.b)
+        for p, e in helper.factor():
+            tmp = self._new()
+            mpq_set_ui(tmp.a, 1u, 1u)
+            mpz_set(tmp.b, p.value)
+            mpz_mod(tmp.c, self.c, tmp.b)
+            f_dict[tmp] = e
+        mpz_set(helper.value, mpq_numref(self.a))
+        h_factor = helper.factor()
+        mpz_set(helper.value, mpq_denref(self.a))
+        h_factor *= Factorization([(p,-e) for p,e in helper.factor()])
+        for p, e in h_factor:
+            # use the legendre symbol to determine whether or not p splits
+            if not mpz_tstbit(p.value, 0u):
+                # 2 breaks the legendre symbol, so deal with it separately
+                # 2 is only inert if D is 5mod8
+                inert = self._1mod4 and not self._1mod8
+            else:
+                inert = mpz_legendre(self.D.value, p.value) == -1
+
+            tmp = self._new()
+            if inert:
+                # handle inert case
+                mpq_set_z(tmp.a, p.value)
+                mpz_set_ui(tmp.b, 1u)
+                mpz_set_ui(tmp.c, 0u)
+                f_dict[tmp] = e
+                continue
+
+            # split/ramified case
+            mpq_set_ui(tmp.a, 1u, 1u)
+            mpz_set(tmp.b, p.value)
+
+            if not mpz_tstbit(p.value, 0u):
+                # like usual, arithmetic for 2 is a bit off
+                # thankfully it is easy in this case
+                mpz_set_ui(tmp.c, 1u)
+            else:
+                mpz_sqrtm(tmp.c, self.D.value, tmp.b)
+                if self._1mod8:
+                    # tmp.c = (1+tmp.c)/2 (mod tmp.b)
+                    mpz_add_ui(tmp.c, tmp.c, 1u)
+                    if not mpz_tstbit(tmp.c, 0u):
+                        mpz_addmul(tmp.c, tmp.c, tmp.b)
+                        mpz_fdiv_q_2exp(tmp.c, tmp.c, 1u)
+                        mpz_mod(tmp.c, tmp.c, tmp.b)
+                    else:
+                        mpz_fdiv_q_2exp(tmp.c, tmp.c, 1u)
+
+            if tmp in f_dict:
+                f_dict[tmp] += e
+            else:
+                f_dict[tmp] = e
+
+            if not mpz_tstbit(p.value, 0u):
+                # test 2 for ramification seperately
+                if not self._1mod8:
+                    f_dict[tmp] += e
+                    continue
+            elif mpz_divisible_p(self.D.value, p.value):
+                # ramified, so we don't have a conjugate
+                # so just double the exponent
+                f_dict[tmp] += e
+                continue
+
+            # construct conjugate
+            tmp = tmp.__copy__()
+            mpz_sub(tmp.c, tmp.b, tmp.c)
+            if tmp._1mod8:
+                mpz_sub_ui(tmp.c, tmp.c, 1u)
+
+            if tmp in f_dict:
+                f_dict[tmp] += e
+            else:
+                f_dict[tmp] = e
+
+        f_list = f_dict.items()
+        f_list.sort()
+        return Factorization(f_list)
 
     def is_prime(self, proof=None):
         if not self.is_integral():
