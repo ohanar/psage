@@ -25,35 +25,36 @@ include 'stdsage.pxi'
 cdef mpz_t mpz_tmp0, mpz_tmp1, mpz_tmp2, mpz_tmp3
 mpz_init(mpz_tmp0); mpz_init(mpz_tmp1); mpz_init(mpz_tmp2); mpz_init(mpz_tmp3)
 
-cdef void mpz_sqrtm(mpz_t rop, mpz_t op1, mpz_t op2):
-    # op2 is assumed to be an odd prime
-    # op1 is assumed to have a square root modulo op2
+cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
+    # p is assumed to be an odd prime
+    # b is assumed to have a square root modulo p
 
-    if mpz_divisible_p(op1, op2):
-        mpz_set_ui(rop, 0u)
+    if mpz_divisible_p(b, p):
+        mpz_set_ui(r, 0u)
         return
 
-    if mpz_tstbit(op2, 1u):
+    if mpz_tstbit(p, 1u):
         # 3mod4 case
-        mpz_add_ui(rop, op2, 1u)
-        mpz_fdiv_q_2exp(rop, rop, 2u)
-        mpz_powm(rop, op1, rop, op2)
+        mpz_add_ui(r, p, 1u)
+        mpz_fdiv_q_2exp(r, r, 2u)
+        mpz_powm(r, b, r, p)
         return
 
-    if mpz_tstbit(op2, 2u):
+    if mpz_tstbit(p, 2u):
         # 5mod8 case
-        mpz_mul_2exp(rop, op1, 1u)
-        mpz_sub_ui(mpz_tmp0, op2, 5u)
+        mpz_mul_2exp(r, b, 1u)
+        mpz_sub_ui(mpz_tmp0, p, 5u)
         mpz_fdiv_q_2exp(mpz_tmp0, mpz_tmp0, 3u)
-        mpz_powm(mpz_tmp0, rop, mpz_tmp0, op2)
-        mpz_powm_ui(mpz_tmp1, mpz_tmp0, 2u, op2)
-        mpz_mul(mpz_tmp1, rop, mpz_tmp1)
-        mpz_mul(rop, mpz_tmp0, op1)
-        mpz_submul(rop, rop, mpz_tmp1)
-        mpz_mod(rop, rop, op2)
+        mpz_powm(mpz_tmp0, r, mpz_tmp0, p)
+        mpz_powm_ui(mpz_tmp1, mpz_tmp0, 2u, p)
+        mpz_mul(mpz_tmp1, r, mpz_tmp1)
+        mpz_mul(r, mpz_tmp0, b)
+        mpz_submul(r, r, mpz_tmp1)
+        mpz_mod(r, r, p)
         return
 
-    raise NotImplementedError
+    # TODO: implement Shanks-Tonelli for 1mod8
+    raise NotImplementedError('Shanks-Tonelli not yet implemented')
 
 cdef class QuadraticIdeal:
     def __init__(self, I):
