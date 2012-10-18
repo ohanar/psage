@@ -125,6 +125,9 @@ cdef class QuadraticIdeal:
     def __contains__(self, x):
         return self._contains_(self._ring(x))
 
+    def __cmp__(left, right):
+        return left._cmp_c_impl(right)
+
     # keep from here on
     def __invert__(self):
         cdef QuadraticIdeal res = self.__copy__()
@@ -287,6 +290,29 @@ cdef class QuadraticIdeal:
             mpz_mul(mpq_numref(self.a), mpq_numref(self.a), mpz_tmp0)
             mpq_canonicalize(self.a)
         mpz_mod(self.c, self.c, self.b)
+
+    cdef int _cmp_c_impl(left, right_py):
+        # for quick sorting
+        # richcmp is used for poset order based on containment
+        cdef int res
+        cdef QuadraticIdeal right = right_py
+        # sort by norm, and then lexigraphically by b and c
+        res = cmp(left.norm(), right.norm())
+        if res:
+            return res
+        res = mpz_cmp(left.b, right.b)
+        if res:
+            return res
+        return mpz_cmp(left.c, right.c)
+
+    def __hash__(self):
+        cdef Rational a
+        cdef Integer b,c
+        a = PY_NEW(Rational)
+        b = PY_NEW(Integer); c = PY_NEW(Integer)
+        mpq_set(a.value, self.a)
+        mpz_set(b.value, self.b); mpz_set(c.value, self.c)
+        return hash((a,b,c))
 
     cpdef QuadraticIdeal __copy__(self):
         cdef QuadraticIdeal res = self._new()
