@@ -31,7 +31,7 @@ cdef class QuadraticIdeal:
     # if D != 1 (mod 8), then we store
     # I = a(b,sqrt(D)+c), where b,c in ZZ, c^2 = D (mod b)
     # if D = 1 (mod 8), then we store
-    # I = a(b,X+c), where b,c in ZZ, c^2 = c+F (mod b)
+    # I = a(b,X+c), where b,c in ZZ, c^2+c = F (mod b)
     # and X^2-X-F = 0, with F = (D-1)/4
     cdef mpq_t a
     cdef mpz_t b, c

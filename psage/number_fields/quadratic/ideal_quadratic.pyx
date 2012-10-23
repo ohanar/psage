@@ -92,7 +92,7 @@ cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
 
 cdef class QuadraticIdeal:
     def __init__(self, I):
-    # currently is just constructed from sage ideal (using integral basis)
+        # currently is just constructed from sage ideal (using integral basis)
         self._ring = I.ring()
         self.D = <Integer>self._ring._D
         self._1mod4 = mpz_tstbit(self.D.value, 0u) \
@@ -104,12 +104,22 @@ cdef class QuadraticIdeal:
             except AttributeError:
                 self._ring._F = (self.D-1)/4
                 self.F = <Integer>self._ring._F
+        else:
+            self.F = self.D
 
         cdef NumberFieldElement_quadratic a, b
         a,b = I.integral_basis()
         if self._1mod8:
-             # 2 splits, so we have to do things differently here
-             raise NotImplementedError
+            # 2 splits, so we have to do things differently here
+            if mpz_cmp(a.denom, b.denom):
+                mpz_mul_2exp(a.a, a.a, 1u)
+                mpz_mul_2exp(mpq_denref(self.a), a.denom, 1u)
+            mpz_set(mpq_denref(self.a), a.denom)
+            mpz_mul_2exp(mpq_numref(self.a), b.b, 1u)
+            mpq_canonicalize(self.a)
+            mpz_divexact(self.b, a.a, mpq_numref(self.a))
+            mpz_sub(self.c, b.a, b.b)
+            mpz_divexact(self.c, b.a, mpq_numref(self.a))
         else:
             if self._1mod4:
                 # in this case we multiply b by two
@@ -123,9 +133,9 @@ cdef class QuadraticIdeal:
             mpz_set(mpq_numref(self.a), b.b)
             mpz_divexact(self.b, a.a, b.b)
             mpz_divexact(self.c, b.a, b.b)
-            if self._1mod4:
-                # sometimes some extra reduction might be needed now
-                mpz_mod(self.c, self.c, self.b)
+        # sometimes some extra reduction might be needed now
+        # depending on what sage returns for an integral basis
+        mpz_mod(self.c, self.c, self.b)
 
     def __cinit__(self):
         mpq_init(self.a)
@@ -145,10 +155,9 @@ cdef class QuadraticIdeal:
         cdef QuadraticIdeal res = PY_NEW(QuadraticIdeal)
         res._ring = self._ring
         res.D = self.D
+        res.F = self.F
         res._1mod4 = self._1mod4
         res._1mod8 = self._1mod8
-        if res._1mod8:
-            res.F = self.F
         return res
 
     cdef NumberFieldElement_quadratic _new_elt(self):
@@ -269,12 +278,14 @@ cdef class QuadraticIdeal:
         mpq_inv(self.a, self.a)
         if mpz_cmp_ui(self.b, 1u):
             # in this case the generators are not in QQ
-            if mpz_sgn(self.c):
+            if self._1mod8:
+                # the linear coefficient is 1 instead of 0
+                # in this case
                 mpz_sub(self.c, self.b, self.c)
-                if self._1mod8:
-                    # the linear coefficient is -1 instead of 0
-                    # in this case
-                    mpz_sub_ui(self.c, self.c, 1u)
+                mpz_add_ui(self.c, self.c, 1u)
+                mpz_mod(self.c, self.c, self.b)
+            elif mpz_sgn(self.c):
+                mpz_sub(self.c, self.b, self.c)
             mpz_mul(mpq_denref(self.a), mpq_denref(self.a), self.b)
             mpq_canonicalize(self.a)
 
@@ -307,9 +318,10 @@ cdef class QuadraticIdeal:
         mpz_mul(mpz_tmp2, mpz_tmp2, self.c)
         mpz_addmul(mpz_tmp2, mpz_tmp1, right.c)
         mpz_add(mpz_tmp1, self.c, right.c)
+        if self._1mod8:
+            mpz_sub_ui(mpz_tmp1, mpz_tmp1, 1u)
         mpz_mul(self.c, self.c, right.c)
-        # TODO: fix for 1mod8 case
-        mpz_add(self.c, self.c, self.D.value)
+        mpz_add(self.c, self.c, self.F.value)
         mpz_gcdext(mpz_tmp0, mpz_tmp1, mpz_tmp3, mpz_tmp0, mpz_tmp1)
         mpz_mul(self.c, mpz_tmp3, self.c)
         mpz_addmul(self.c, mpz_tmp1, mpz_tmp2)
@@ -531,14 +543,14 @@ cdef class QuadraticIdeal:
             else:
                 mpz_sqrtm(tmp.c, self.D.value, tmp.b)
                 if self._1mod8:
-                    # tmp.c = (1+tmp.c)/2 (mod tmp.b)
-                    mpz_add_ui(tmp.c, tmp.c, 1u)
-                    if not mpz_tstbit(tmp.c, 0u):
+                    # tmp.c = (-1+tmp.c)/2 (mod tmp.b)
+                    if mpz_tstbit(tmp.c, 0u):
+                        mpz_tdiv_q_2exp(tmp.c, tmp.c, 1u)
+                    else:
+                        mpz_sub_ui(tmp.c, tmp.c, 1u)
                         mpz_addmul(tmp.c, tmp.c, tmp.b)
                         mpz_tdiv_q_2exp(tmp.c, tmp.c, 1u)
                         mpz_mod(tmp.c, tmp.c, tmp.b)
-                    else:
-                        mpz_tdiv_q_2exp(tmp.c, tmp.c, 1u)
 
             if tmp in f_dict:
                 f_dict[tmp] += e
@@ -560,7 +572,8 @@ cdef class QuadraticIdeal:
             tmp = tmp.__copy__()
             mpz_sub(tmp.c, tmp.b, tmp.c)
             if tmp._1mod8:
-                mpz_sub_ui(tmp.c, tmp.c, 1u)
+                mpz_add_ui(tmp.c, tmp.c, 1u)
+                mpz_mod(tmp.c, tmp.c, tmp.b)
 
             if tmp in f_dict:
                 f_dict[tmp] += e
@@ -625,6 +638,7 @@ cdef class QuadraticIdeal:
             mpz_mul_2exp(y.a, self.c, 1u)
             mpz_add_ui(y.a, y.a, 1u)
             mpz_set(y.b, mpq_numref(self.a))
+            mpz_mul_2exp(y.a, y.a, 1u)
             mpz_mul_2exp(y.denom, mpq_denref(self.a), 1u)
             y._reduce_c_()
         else:
