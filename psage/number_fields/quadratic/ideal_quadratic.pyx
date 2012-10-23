@@ -41,16 +41,14 @@ cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
 
     if mpz_tstbit(p, 1u):
         # 3mod4 case
-        mpz_add_ui(r, p, 1u)
-        mpz_fdiv_q_2exp(r, r, 2u)
+        mpz_cdiv_q_2exp(r, p, 2u)
         mpz_powm(r, b, r, p) # r = b**((p+1)/4)
         return
 
     if mpz_tstbit(p, 2u):
         # 5mod8 case
         mpz_mul_2exp(r, b, 1u)
-        mpz_sub_ui(mpz_tmp0, p, 5u)
-        mpz_fdiv_q_2exp(mpz_tmp0, mpz_tmp0, 3u)
+        mpz_tdiv_q_2exp(mpz_tmp0, p, 3u)
         mpz_powm(mpz_tmp0, r, mpz_tmp0, p) # mpz_tmp0 = (2*b)**((p-5)/8)
         mpz_powm_ui(mpz_tmp1, mpz_tmp0, 2u, p)
         mpz_mul(mpz_tmp1, r, mpz_tmp1) # mpz_tmp1 = (2*b)**((p-1)/4)
@@ -62,8 +60,7 @@ cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
     if mpz_tstbit(p, 3u):
         # 9mod16 case
         mpz_mul_2exp(r, b, 1u)
-        mpz_sub_ui(mpz_tmp3, p, 9u)
-        mpz_fdiv_q_2exp(mpz_tmp3, mpz_tmp3, 4u)
+        mpz_tdiv_q_2exp(mpz_tmp3, p, 4u)
         mpz_powm(mpz_tmp0, r, mpz_tmp3, p) # mpz_tmp0 = (2*b)**((p-9)/16)
         mpz_powm_ui(mpz_tmp1, mpz_tmp0, 2u, p)
         mpz_mul(mpz_tmp1, r, mpz_tmp1) # mpz_tmp1 = (2*b)**((p-1)/8)
@@ -73,7 +70,7 @@ cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
         if not mpz_cmp_ui(mpz_tmp2, 1u):
             # find a quadratic non-residue
             mpz_set_ui(r, 2u)
-            while mpz_legendre(r, p) != -1:
+            while mpz_legendre(r, p) > -1:
                 mpz_add_ui(r, r, 1u)
 
             # mpz_tmp0 *= r**(p-1)/8
@@ -538,10 +535,10 @@ cdef class QuadraticIdeal:
                     mpz_add_ui(tmp.c, tmp.c, 1u)
                     if not mpz_tstbit(tmp.c, 0u):
                         mpz_addmul(tmp.c, tmp.c, tmp.b)
-                        mpz_fdiv_q_2exp(tmp.c, tmp.c, 1u)
+                        mpz_tdiv_q_2exp(tmp.c, tmp.c, 1u)
                         mpz_mod(tmp.c, tmp.c, tmp.b)
                     else:
-                        mpz_fdiv_q_2exp(tmp.c, tmp.c, 1u)
+                        mpz_tdiv_q_2exp(tmp.c, tmp.c, 1u)
 
             if tmp in f_dict:
                 f_dict[tmp] += e
