@@ -368,6 +368,14 @@ cdef class QuadraticIdeal:
             mpq_canonicalize(self.a)
         mpz_mod(self.c, self.c, self.b)
 
+    cdef void _c_igcd(self, QuadraticIdeal other):
+        mpz_gcd(mpq_numref(self.a), mpq_numref(self.a), mpq_numref(other.a))
+        mpz_lcm(mpq_denref(self.a), mpq_denref(self.a), mpq_denref(other.a))
+        mpz_gcd(self.b, self.b, other.b)
+        mpz_sub(self.c, self.c, other.c)
+        mpz_gcd(self.b, self.b, self.c)
+        mpz_mod(self.c, other.c, self.b)
+
     cdef int _cmp_c_impl(left, right_py):
         # for quick sorting
         # richcmp is used for poset order based on containment
@@ -492,6 +500,11 @@ cdef class QuadraticIdeal:
 #        if t*right.n%self.n: return False
 #        if t*(right.r-self.r)%self.n: return False
 #        return True
+
+    def gcd(self, other):
+        cdef QuadraticIdeal res = self.__copy__()
+        res._c_igcd(other)
+        return res
 
     def factor(self):
         # we piggy back off of integer factorization

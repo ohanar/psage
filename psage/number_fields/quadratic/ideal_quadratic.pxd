@@ -49,9 +49,11 @@ cdef class QuadraticIdeal:
 
     cpdef QuadraticIdeal __copy__(self)
 
+    # most arithmetic is done via the following inplace functions
     cdef void _c_iinvert(self)
     cdef void _c_imul(self, QuadraticIdeal right)
     cdef void _c_isq(self)
+    cdef void _c_igcd(self, QuadraticIdeal other)
 
     # to inherit
     cpdef bint _contains_(self, x)
