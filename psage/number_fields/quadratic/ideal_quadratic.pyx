@@ -532,11 +532,11 @@ cdef class QuadraticIdeal:
 
     cdef int _cmp_c_impl(left, right_py):
         # for quick sorting
-        # richcmp is used for poset order based on containment
+        # richcmp is used for poset order based on reversed containment
         cdef int res
         cdef QuadraticIdeal right = right_py
-        # sort by norm, and then lexigraphically by b and c
-        res = cmp(left.norm(), right.norm())
+        # sort by norm, then lexigraphically by b and c
+        res = (<Rational>left.norm())._cmp_c_impl(right.norm())
         if res:
             return res
         res = mpz_cmp(left.b, right.b)
@@ -556,14 +556,28 @@ cdef class QuadraticIdeal:
 
         cdef QuadraticIdeal right = right_py
         if op == Py_NE:
+            # left != right when any of a,b,c disagree
             return mpq_cmp(left.a, right.a) or mpz_cmp(left.b, right.b) \
                     or mpz_cmp(left.c, right.c)
 
-        # probably can be done more quickly
+        # probably can be done in a faster fashion
+        cdef NumberFieldElement_quadratic x
         if op == Py_LE:
-            return right._div_(left).is_integral()
+            # left <= right if and only if right/left is integral
+            # right/left is integral if and only if
+            # left contains a generating set of right
+            for x in right.integral_basis():
+                if not left._contains_(x):
+                    return False
+            return True
         if op == Py_GE:
-            return left._div_(right).is_integral()
+            # left >= right if and only if left/right is integral
+            # left/right is integral if and only if
+            # right contains a generating set of left
+            for x in left.integral_basis():
+                if not right._contains_(x):
+                    return False
+            return True
 
     def __hash__(self):
         # TODO: figure out a better hash function
@@ -581,39 +595,111 @@ cdef class QuadraticIdeal:
         mpz_set(res.c, self.c)
         return res
 
-    # TODO: make sure logic works for 1mod8 (probably doesn't)
-    cpdef bint _contains_(self, x):
-        cdef NumberFieldElement_quadratic y = x
+    cpdef bint _contains_(self, x_py):
+        cdef NumberFieldElement_quadratic x = x_py
+        cdef bint ret
+        cdef mpz_t t0
 
-        if not mpz_sgn(y.b): # in this case x in QQ
-            mpz_mul(mpz_tmp0, y.a, mpq_denref(self.a))
-            mpz_mul(mpz_tmp1, y.denom, mpq_numref(self.a))
-            mpz_mul(mpz_tmp1, mpz_tmp1, self.b)
-            return mpz_divisible_p(mpz_tmp0, mpz_tmp1)
+        if not mpz_sgn(x.b):
+            # rational in this case
+            if not mpz_sgn(x.a):
+                # zero is in every ideal
+                return True
+            # so x.a/(x.denom*a*b) must be integral
+            ret = mpz_divisible_p(x.a, mpq_numref(self.a))
+            if ret:
+                ret = mpz_divisible_p(mpq_denref(self.a), x.denom)
+                if ret:
+                    mpz_init(t0)
+                    mpz_divexact(t0, x.a, mpq_numref(self.a))
+                    mpz_mul(t0, t0, mpq_denref(self.a))
+                    mpz_divexact(t0, t0, x.denom)
+                    ret = mpz_divisible_p(t0, self.b)
+                    mpz_clear(t0)
 
-        mpz_mul(mpz_tmp0, y.b, mpq_denref(self.a))
+            return ret
+
+        cdef mpz_t t1, t2
+
         if self._1mod4:
-            mpz_mul_2exp(mpz_tmp0, mpz_tmp0, 1u)
-        mpz_mul(mpz_tmp1, y.denom, mpq_numref(self.a))
+            # want to solve
+            # [ a*b a*c ] * [ y ] = [ (x.a-x.b)/x.denom ]
+            # [   0   a ] * [ z ] = [     2*x.b/x.denom ]
+            # for integers y, z
 
-        if not mpz_divisible_p(mpz_tmp0, mpz_tmp1):
-            return False
+            mpz_init(t0)
+            mpz_mul_2exp(t0, x.b, 1u) # t0 = 2*x.b
 
-        if self._1mod4:
-            mpz_cdiv_q_2exp(mpz_tmp1, self.b, 1u)
-            mpz_mul(mpz_tmp0, mpz_tmp0, mpz_tmp1)
-            mpz_sub_ui(mpz_tmp1, self.c, 1u)
-            mpz_mul(mpz_tmp0, mpz_tmp0, mpz_tmp1)
-            mpz_sub(mpz_tmp1, y.a, y.b)
-            mpz_submul(mpz_tmp0, mpz_tmp1, mpq_denref(self.a))
+            # z = t0/(a*x.denom)
+            # check to see if z is integral, if so compute
+            if not mpz_divisible_p(t0, mpq_numref(self.a)):
+                mpz_clear(t0)
+                return False
+            mpz_init(t1)
+            mpz_divexact(t1, t0, mpq_numref(self.a))
+            mpz_mul(t1, t1, mpq_denref(self.a))
+            if mpz_divisible_p(t1, x.denom):
+                mpz_divexact(t1, t1, x.denom)
+            else:
+                mpz_clear(t0); mpz_clear(t1)
+                return False
+
+            mpz_sub(t0, x.a, x.b) # t0 = x.a-x.b
+            # y = (t0/(a*x.denom) - c*z)/b
+            # check to see if y is integral
+            if not mpz_divisible_p(t0, mpq_numref(self.a)):
+                mpz_clear(t0); mpz_clear(t1)
+                return False
+            mpz_init(t2)
+            mpz_divexact(t2, t0, mpq_numref(self.a))
+            mpz_mul(t2, t2, mpq_denref(self.a))
+            if mpz_divisible_p(t2, x.denom):
+                mpz_divexact(t2, t2, x.denom)
+            else:
+                mpz_clear(t0); mpz_clear(t1); mpz_clear(t2)
+                return False
+            mpz_submul(t2, t1, self.c)
+            ret = mpz_divisible_p(t2, self.b)
+
+            mpz_clear(t0); mpz_clear(t1); mpz_clear(t2)
         else:
-            mpz_mul(mpz_tmp0, mpz_tmp0, self.c)
-            mpz_submul(mpz_tmp0, y.a, mpq_denref(self.a))
+            # want to solve
+            # [ a*b a*c ] * [ y ] = [ x.a/x.denom ]
+            # [   0   a ] * [ z ] = [ x.b/x.denom ]
+            # for integers y, z
 
-        mpz_mul(mpz_tmp1, self.b, mpq_numref(self.a))
-        mpz_mul(mpz_tmp1, mpz_tmp1, y.denom)
+            # z = x.b/(a*x.denom)
+            # y = (x.a/(a*x.denom) - c*z)/b
+            # some quick checks
+            if not mpz_divisible_p(x.b, mpq_numref(self.a)):
+                return False
+            if not mpz_divisible_p(x.a, mpq_numref(self.a)):
+                return False
 
-        return mpz_divisible_p(mpz_tmp0, mpz_tmp1)
+            # check to see if z is integral, if so compute
+            mpz_init(t0)
+            mpz_divexact(t0, x.b, mpq_numref(self.a))
+            mpz_mul(t0, t0, mpq_denref(self.a))
+            if mpz_divisible_p(t0, x.denom):
+                mpz_divexact(t0, t0, x.denom)
+            else:
+                mpz_clear(t0)
+                return False
+
+            # check to see if y is integral
+            mpz_init(t1)
+            mpz_divexact(t1, x.a, mpq_numref(self.a))
+            mpz_mul(t1, t1, mpq_denref(self.a))
+            if mpz_divisible_p(t1, x.denom):
+                mpz_divexact(t1, t1, x.denom)
+            else:
+                mpz_clear(t0); mpz_clear(t1)
+                return False
+            mpz_submul(t1, t0, self.c)
+            ret = mpz_divisible_p(t1, self.b)
+
+            mpz_clear(t0); mpz_clear(t1)
+        return ret
 
     cpdef Rational norm(self):
         # norm = a^2*b
@@ -882,7 +968,11 @@ cdef class QuadraticIdeal:
         return self._idiv_(right)
 
     def __contains__(self, x):
-        return self._contains_(self._ring(x))
+        try:
+            x = self._ring(x)
+        except TypeError:
+            return False
+        return self._contains_(x)
 
     def __cmp__(left, right):
         return left._cmp_c_impl(right)
