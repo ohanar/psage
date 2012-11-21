@@ -22,14 +22,7 @@
 include 'gmp.pxi'
 include 'stdsage.pxi'
 
-cdef mpz_t mpz_tmp0, mpz_tmp1, mpz_tmp2, mpz_tmp3
-mpz_init(mpz_tmp0); mpz_init(mpz_tmp1); mpz_init(mpz_tmp2); mpz_init(mpz_tmp3)
-
-cdef Integer int_tmp0, int_tmp1
-int_tmp0 = PY_NEW(Integer); int_tmp1 = PY_NEW(Integer)
-
-cdef Rational rat_tmp
-rat_tmp = PY_NEW(Rational)
+from sage.rings.number_field.number_field_ideal import NumberFieldIdeal
 
 cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
     # p is assumed to be an odd prime
@@ -45,60 +38,80 @@ cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
         mpz_powm(r, b, r, p) # r = b**((p+1)/4)
         return
 
+    cdef mpz_t t0, t1
+    mpz_init(t0); mpz_init(t1)
+
     if mpz_tstbit(p, 2u):
         # 5mod8 case
         mpz_mul_2exp(r, b, 1u)
-        mpz_tdiv_q_2exp(mpz_tmp0, p, 3u)
-        mpz_powm(mpz_tmp0, r, mpz_tmp0, p) # mpz_tmp0 = (2*b)**((p-5)/8)
-        mpz_powm_ui(mpz_tmp1, mpz_tmp0, 2u, p)
-        mpz_mul(mpz_tmp1, r, mpz_tmp1) # mpz_tmp1 = (2*b)**((p-1)/4)
-        mpz_mul(r, mpz_tmp0, b)
-        mpz_submul(r, r, mpz_tmp1) # r = b*mpz_tmp0*(1-mpz_tmp1)
+        mpz_tdiv_q_2exp(t0, p, 3u)
+        mpz_powm(t0, r, t0, p) # t0 = (2*b)**((p-5)/8)
+        mpz_powm_ui(t1, t0, 2u, p)
+        mpz_mul(t1, r, t1) # t1 = (2*b)**((p-1)/4)
+        mpz_mul(r, t0, b)
+        mpz_submul(r, r, t1) # r = b*t0*(1-t1)
         mpz_mod(r, r, p)
+
+        mpz_clear(t0); mpz_clear(t1)
         return
+
+    cdef mpz_t t2, t3
+    mpz_init(t2); mpz_init(t3)
 
     if mpz_tstbit(p, 3u):
         # 9mod16 case
         mpz_mul_2exp(r, b, 1u)
-        mpz_tdiv_q_2exp(mpz_tmp3, p, 4u)
-        mpz_powm(mpz_tmp0, r, mpz_tmp3, p) # mpz_tmp0 = (2*b)**((p-9)/16)
-        mpz_powm_ui(mpz_tmp1, mpz_tmp0, 2u, p)
-        mpz_mul(mpz_tmp1, r, mpz_tmp1) # mpz_tmp1 = (2*b)**((p-1)/8)
+        mpz_tdiv_q_2exp(t3, p, 4u)
+        mpz_powm(t0, r, t3, p) # t0 = (2*b)**((p-9)/16)
+        mpz_powm_ui(t1, t0, 2u, p)
+        mpz_mul(t1, r, t1) # t1 = (2*b)**((p-1)/8)
 
-        mpz_powm_ui(mpz_tmp2, mpz_tmp1, 2u, p)
+        mpz_powm_ui(t2, t1, 2u, p)
 
-        if not mpz_cmp_ui(mpz_tmp2, 1u):
+        if not mpz_cmp_ui(t2, 1u):
             # find a quadratic non-residue
             mpz_set_ui(r, 2u)
             while mpz_legendre(r, p) > -1:
                 mpz_add_ui(r, r, 1u)
 
-            # mpz_tmp0 *= r**(p-1)/8
-            # mpz_tmp1 *= r**(p-1)/4
-            mpz_mul_2exp(mpz_tmp3, mpz_tmp3, 1u)
-            mpz_add_ui(mpz_tmp3, mpz_tmp3, 1u)
-            mpz_powm(r, r, mpz_tmp3, p)
-            mpz_mul(mpz_tmp0, mpz_tmp0, r)
+            # t0 *= r**(p-1)/8
+            # t1 *= r**(p-1)/4
+            mpz_mul_2exp(t3, t3, 1u)
+            mpz_add_ui(t3, t3, 1u)
+            mpz_powm(r, r, t3, p)
+            mpz_mul(t0, t0, r)
             mpz_powm_ui(r, r, 2u, p)
-            mpz_mul(mpz_tmp1, mpz_tmp1, r)
+            mpz_mul(t1, t1, r)
 
-        mpz_mul(r, mpz_tmp0, b)
-        mpz_submul(r, r, mpz_tmp1) # r = b*mpz_tmp0*(1-mpz_tmp1)
+        mpz_mul(r, t0, b)
+        mpz_submul(r, r, t1) # r = b*t0*(1-t1)
         mpz_mod(r, r, p)
+
+        mpz_clear(t0); mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
         return
 
     # TODO: implement Shanks-Tonelli for 1mod16
     raise NotImplementedError('Shanks-Tonelli not yet implemented')
 
 cdef class QuadraticIdeal:
-    def __init__(self, I):
-        # currently is just constructed from sage ideal (using integral basis)
-        self._ring = I.ring()
+    def __init__(self, *args):
+        if not args:
+            raise ValueError('cannot determine base ring')
+        for i, arg in enumerate(args):
+            if arg:
+                break
+        if isinstance(arg, NumberFieldElement_quadratic):
+            self._ring = arg.parent()
+        elif isinstance(arg, QuadraticIdeal):
+            self._ring = (<QuadraticIdeal>arg)._ring
+        elif isinstance(arg, NumberFieldIdeal):
+            # currently we allow construction from sage ideal
+            self._ring = arg.ring()
         self.D = <Integer>self._ring._D
         self._1mod4 = mpz_tstbit(self.D.value, 0u) \
                 and not mpz_tstbit(self.D.value, 1u)
         self._1mod8 = self._1mod4 and not mpz_tstbit(self.D.value, 2u)
-        if self._1mod8:
+        if self._1mod4:
             try:
                 self.F = <Integer>self._ring._F
             except AttributeError:
@@ -107,35 +120,43 @@ cdef class QuadraticIdeal:
         else:
             self.F = self.D
 
-        cdef NumberFieldElement_quadratic a, b
-        a,b = I.integral_basis()
-        if self._1mod8:
-            # 2 splits, so we have to do things differently here
-            if mpz_cmp(a.denom, b.denom):
-                mpz_mul_2exp(a.a, a.a, 1u)
-                mpz_mul_2exp(mpq_denref(self.a), a.denom, 1u)
-            mpz_set(mpq_denref(self.a), a.denom)
-            mpz_mul_2exp(mpq_numref(self.a), b.b, 1u)
-            mpq_canonicalize(self.a)
-            mpz_divexact(self.b, a.a, mpq_numref(self.a))
-            mpz_sub(self.c, b.a, b.b)
-            mpz_divexact(self.c, b.a, mpq_numref(self.a))
+        if arg:
+            if isinstance(arg, NumberFieldElement_quadratic):
+                self._set_from_elt(arg)
+            elif isinstance(arg, QuadraticIdeal):
+                mpq_set(self.a, (<QuadraticIdeal>arg).a)
+                mpz_set(self.b, (<QuadraticIdeal>arg).b)
+                mpz_set(self.c, (<QuadraticIdeal>arg).c)
+            elif isinstance(arg, NumberFieldIdeal):
+                self._set_from_sage_ideal(arg)
         else:
-            if self._1mod4:
-                # in this case we multiply b by two
-                # which is fine since 2 is inert for 5mod8
-                b *= 2
-            # in this case, we know that the denominators should be equal
-            assert not mpz_cmp(a.denom, b.denom)
-            mpz_set(mpq_denref(self.a), a.denom)
-            # we also know that b.b should divide both a.a and b.a
-            assert mpz_divisible_p(a.a, b.b) and mpz_divisible_p(b.a, b.b)
-            mpz_set(mpq_numref(self.a), b.b)
-            mpz_divexact(self.b, a.a, b.b)
-            mpz_divexact(self.c, b.a, b.b)
-        # sometimes some extra reduction might be needed now
-        # depending on what sage returns for an integral basis
-        mpz_mod(self.c, self.c, self.b)
+            mpq_set_ui(self.a, 0u, 1u)
+            mpz_set_ui(self.b, 1u)
+            mpz_set_ui(self.c, 0u)
+            return
+
+        if self.is_one(): return
+
+        args = args[i+1:]
+
+        cdef QuadraticIdeal I = self._new()
+        for arg in args:
+            if not arg: continue
+
+            if isinstance(arg, NumberFieldElement_quadratic):
+                I._set_from_elt(arg)
+            elif isinstance(arg, QuadraticIdeal):
+                mpq_set(I.a, (<QuadraticIdeal>arg).a)
+                mpz_set(I.b, (<QuadraticIdeal>arg).b)
+                mpz_set(I.c, (<QuadraticIdeal>arg).c)
+            elif isinstance(arg, NumberFieldIdeal):
+                I._set_from_sage_ideal(arg)
+            else:
+                arg = self._ring(arg)
+                I._set_from_elt(arg)
+
+            self._c_iadd(I)
+            if self.is_one(): return
 
     def __cinit__(self):
         mpq_init(self.a)
@@ -171,42 +192,85 @@ cdef class QuadraticIdeal:
         res.D = self.D
         return res
 
-    # methods to be inherited
-    def ring(self):
-        return self._ring
+    cdef void _set_from_elt(self, NumberFieldElement_quadratic elt):
+        mpz_set(mpq_denref(self.a), elt.denom)
 
-    def __repr__(self):
-        cdef Rational t = PY_NEW(Rational)
-        cdef Integer T = PY_NEW(Integer)
-        mpq_set(t.value, self.a)
-        mpz_set(T.value, self.b)
-        s = '('+T.str() + ', x + '
-        mpz_set(T.value, self.c)
-        return t.str()+s+T.str()+')'
+        cdef mpz_t t0
+        mpz_init(t0)
 
-    def __mul__(left, right):
-        return left._mul_(right)
+        if self._1mod4:
+            # Compute the HNF of
+            # [ a-b 2*b*F ]
+            # [ 2*b   a+b ]
+            mpz_mul_2exp(self.b, elt.b, 1u)
+            mpz_add(self.c, elt.a, elt.b)
+            mpz_gcdext(mpq_numref(self.a), self.b, self.c, self.b, self.c)
+            mpz_mul_2exp(self.c, self.c, 1u)
+            mpz_sub(t0, elt.a, elt.b)
+            mpz_mul(self.c, self.c, elt.b)
+            mpz_mul(self.c, self.c, self.F.value)
+            mpz_addmul(self.c, self.b, t0)
+        else:
+            # Compute the HNF of
+            # [ a b*D ]
+            # [ b   a ]
+            mpz_gcdext(mpq_numref(self.a), self.b, self.c, elt.b, elt.a)
+            mpz_mul(self.c, self.c, elt.b)
+            mpz_mul(self.c, self.c, self.D.value)
+            mpz_addmul(self.c, elt.a, self.b)
 
-    def __imul__(self, right):
-        return self._imul_(right)
+        mpz_pow_ui(self.b, elt.a, 2u)
+        mpz_pow_ui(t0, elt.b, 2u)
+        mpz_submul(self.b, t0, self.D.value)
+        if mpz_sgn(self.b) < 0:
+            mpz_neg(self.b, self.b)
+        mpz_divexact(self.b, self.b, mpq_numref(self.a))
 
-    def __div__(left, right):
-        return left._div_(right)
+        self._c_reduce(mpq_numref(self.a))
 
-    def __idiv__(self, right):
-        return self._idiv_(right)
+        mpz_clear(t0)
 
-    def __contains__(self, x):
-        return self._contains_(self._ring(x))
+    cdef void _set_from_sage_ideal(self, I):
+        cdef NumberFieldElement_quadratic a, b
+        a,b = I.integral_basis()
+        mpz_set(mpq_numref(self.a), b.b)
+        mpz_set(mpq_denref(self.a), b.denom)
+        mpz_divexact(self.b, b.denom, a.denom)
+        mpz_mul(self.b, self.b, a.a)
+        mpz_divexact(self.b, self.b, b.b)
+        mpz_divexact(self.c, b.a, b.b)
 
-    def __cmp__(left, right):
-        return left._cmp_c_impl(right)
+        cdef mpz_t t0
+        if self._1mod4:
+            mpz_sub_ui(self.c, self.c, 1u)
+            if mpz_tstbit(self.b, 0u):
+                mpz_init(t0)
+                mpz_cdiv_q_2exp(t0, self.b, 1u)
+                mpz_mul(self.c, self.c, t0)
+                mpz_clear(t0)
+            else:
+                mpz_mul_2exp(mpq_numref(self.a), mpq_numref(self.a), 1u)
+                mpz_tdiv_q_2exp(self.b, self.b, 1u)
+                mpz_tdiv_q_2exp(self.c, self.c, 1u)
+        mpq_canonicalize(self.a)
+        # sometimes some extra reduction might be needed now
+        # depending on what sage returns for an integral basis
+        mpz_mod(self.c, self.c, self.b)
 
-    # keep from here on
+    def __nonzero__(self):
+        return mpq_sgn(self.a)
+
     def __invert__(self):
         cdef QuadraticIdeal res = self.__copy__()
         res._c_iinvert()
         return res
+
+    def _add_(left, right):
+        return left.__copy__()._iadd_(right)
+
+    def _iadd_(self, right):
+        self._c_iadd(right)
+        return self
 
     def _mul_(left, right):
         return left.__copy__()._imul_(right)
@@ -243,8 +307,7 @@ cdef class QuadraticIdeal:
         if n == 1:
             return res
 
-        #res._c_isq()
-        res._c_imul(res)
+        res._c_isq()
         if n == 2:
             return res
         if n == 3:
@@ -253,8 +316,7 @@ cdef class QuadraticIdeal:
         m = n & 1
         n >>= 1
         while not n&1:
-            #res._c_isq()
-            res._c_imul(res)
+            res._c_isq()
             n >>= 1
         n >>= 1
         tmp = res.__copy__()
@@ -262,41 +324,47 @@ cdef class QuadraticIdeal:
             res._c_imul(self)
 
         while n:
-            #tmp._c_isq()
-            tmp._c_imul(tmp)
+            tmp._c_isq()
             if n&1:
                 res._c_imul(tmp)
             n >>= 1
         return res
 
+    cdef void _c_reduce(self, mpz_t gcd):
+        if mpz_cmp_ui(gcd, 1u):
+            mpz_divexact(self.b, self.b, gcd)
+            mpz_divexact(self.c, self.c, gcd)
+            if gcd != mpq_numref(self.a):
+                mpz_mul(mpq_numref(self.a), mpq_numref(self.a), gcd)
+            mpq_canonicalize(self.a)
+        mpz_mod(self.c, self.c, self.b)
+
     cdef void _c_iinvert(self):
         '''
         This function inverts self inplace
         '''
-        if not mpq_sgn(self.a):
+        if not self:
             raise ZeroDivisionError('division by zero')
         mpq_inv(self.a, self.a)
         if mpz_cmp_ui(self.b, 1u):
-            # in this case the generators are not in QQ
-            if self._1mod8:
-                # the linear coefficient is 1 instead of 0
-                # in this case
+            # not rational
+            if self._1mod4:
+                # linear coefficient is 1 instead of 0
                 mpz_sub(self.c, self.b, self.c)
-                mpz_add_ui(self.c, self.c, 1u)
-                mpz_mod(self.c, self.c, self.b)
+                mpz_sub_ui(self.c, self.c, 1u)
             elif mpz_sgn(self.c):
+                # there is a non-ramified prime divisor
                 mpz_sub(self.c, self.b, self.c)
             mpz_mul(mpq_denref(self.a), mpq_denref(self.a), self.b)
             mpq_canonicalize(self.a)
 
-    # this method could probably be improved
     cdef void _c_imul(self, QuadraticIdeal right):
         '''
         This function multiplies self by right inplace
         '''
         # quickly handle when one factor is zero
-        if not mpq_sgn(self.a): return
-        if not mpq_sgn(right.a):
+        if not self: return
+        if not right:
             mpq_set_ui(self.a, 0u, 1u)
             mpz_set_ui(self.b, 1u)
             mpz_set_ui(self.c, 0u)
@@ -305,76 +373,162 @@ cdef class QuadraticIdeal:
         # the factored out portion can be multiplied directly
         mpq_mul(self.a, self.a, right.a)
 
-        mpz_gcdext(mpz_tmp0, mpz_tmp1, mpz_tmp2, self.b, right.b)
-        mpz_mul(mpz_tmp1, mpz_tmp1, self.b)
-        mpz_mul(mpz_tmp2, mpz_tmp2, right.b)
-        mpz_mul(self.b, self.b, right.b)
-        if not mpz_cmp_ui(mpz_tmp0, 1u): # if gcd = 1, simple case
-            mpz_mul(self.c, mpz_tmp2, self.c)
-            mpz_addmul(self.c, mpz_tmp1, right.c)
-            mpz_mod(self.c, self.c, self.b)
+        # quickly handle when one factor is rational
+        if not mpz_cmp_ui(right.b, 1u): return
+        if not mpz_cmp_ui(self.b, 1u):
+            mpz_set(self.b, right.b)
+            mpz_set(self.c, right.c)
             return
-        # gcd > 1, need to do another xgcd
-        mpz_mul(mpz_tmp2, mpz_tmp2, self.c)
-        mpz_addmul(mpz_tmp2, mpz_tmp1, right.c)
-        mpz_add(mpz_tmp1, self.c, right.c)
-        if self._1mod8:
-            mpz_sub_ui(mpz_tmp1, mpz_tmp1, 1u)
+
+        # We are computing the HNF of
+        # [ b*y b*z y*c c*z+D ]
+        # [   0   b   y   c+z ]
+
+        # start by consolidating the 2nd and 3rd columns
+        cdef mpz_t t0, t1, t2
+        mpz_init(t0); mpz_init(t1); mpz_init(t2)
+
+        mpz_gcdext(t0, t1, t2, self.b, right.b)
+        mpz_mul(t1, t1, self.b)
+        mpz_mul(t2, t2, right.b)
+        mpz_mul(t1, t1, right.c)
+        mpz_addmul(t1, t2, self.c)
+
+        mpz_mul(self.b, self.b, right.b)
+        if not mpz_cmp_ui(t0, 1u): # if gcd = 1, we are done
+            mpz_mod(self.c, t1, self.b)
+
+            mpz_clear(t0); mpz_clear(t1); mpz_clear(t2)
+            return
+
+        # now we need to consolidate the 4th column
+        cdef mpz_t t3
+        mpz_init(t3)
+
+        mpz_add(t2, self.c, right.c)
+        if self._1mod4:
+            # linear coefficient is 1 instead of 0
+            mpz_add_ui(t2, t2, 1u)
         mpz_mul(self.c, self.c, right.c)
         mpz_add(self.c, self.c, self.F.value)
-        mpz_gcdext(mpz_tmp0, mpz_tmp1, mpz_tmp3, mpz_tmp0, mpz_tmp1)
-        mpz_mul(self.c, mpz_tmp3, self.c)
-        mpz_addmul(self.c, mpz_tmp1, mpz_tmp2)
-        if mpz_cmp_ui(mpz_tmp0, 1u): # if gcd > 1, have to do a bit extra
-            mpz_divexact(self.b, self.b, mpz_tmp0)
-            mpz_divexact(self.b, self.b, mpz_tmp0)
-            mpz_divexact(self.c, self.c, mpz_tmp0)
-            mpz_mul(mpq_numref(self.a), mpq_numref(self.a), mpz_tmp0)
-            mpq_canonicalize(self.a)
-        mpz_mod(self.c, self.c, self.b)
+        mpz_gcdext(t0, t2, t3, t0, t2)
+        mpz_mul(self.c, self.c, t3)
+        mpz_addmul(self.c, t2, t1)
+        mpz_divexact(self.b, self.b, t0)
 
-    # TODO: Currently broken, fix
+        self._c_reduce(t0)
+
+        mpz_clear(t0); mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
+
     cdef void _c_isq(self):
         '''
         This function squares self inplace
         '''
-        if not mpq_sgn(self.a): return
+        # quickly handle when if zero
+        if not self: return
 
+        # the factored out portion can be squared directly
         mpz_pow_ui(mpq_numref(self.a), mpq_numref(self.a), 2u)
         mpz_pow_ui(mpq_denref(self.a), mpq_denref(self.a), 2u)
 
-        if not mpq_cmp_ui(self.a, 1u, 1u):
-            return
+        # if rational, then we are done
+        if not mpz_cmp_ui(self.b, 1u): return
 
-        if not self._1mod8 and not mpz_sgn(self.c):
-            mpz_mul(mpq_numref(self.a), mpq_numref(self.a), self.b)
-            mpq_canonicalize(self.a)
-            mpz_divexact(mpz_tmp0, self.b, self.D.value)
-            mpz_gcd(self.b, self.b, mpz_tmp0)
-            return
+        # We are computing the HNF of
+        # [ b*b b*c c*c+D ]
+        # [   0   b   2*c ]
 
-        mpz_mul_2exp(mpz_tmp0, self.c, 1u)
-        mpz_gcdext(mpz_tmp0, mpz_tmp1, mpz_tmp2, self.b, mpz_tmp0)
-        mpz_mul(mpz_tmp1, mpz_tmp1, self.c)
+        # just need to consolidate 2nd and 3rd columns
+        cdef mpz_t t0, t1, t2
+        mpz_init(t0); mpz_init(t1); mpz_init(t2);
+
+        mpz_mul_2exp(t0, self.c, 1u)
+        if self._1mod4:
+            # linear coefficient is 1 instead of 0
+            mpz_add_ui(t0, t0, 1u)
+        mpz_gcdext(t0, t1, t2, self.b, t0)
+        mpz_mul(t1, t1, self.c)
         mpz_pow_ui(self.c, self.c, 2u)
-        mpz_add(self.c, self.c, self.D.value)
-        mpz_mul(self.c, self.c, mpz_tmp2)
-        mpz_addmul(self.c, self.b, mpz_tmp1)
+        mpz_add(self.c, self.c, self.F.value)
+        mpz_mul(self.c, self.c, t2)
+        mpz_addmul(self.c, t1, self.b)
         mpz_pow_ui(self.b, self.b, 2u)
-        if mpz_cmp_ui(mpz_tmp0, 1u):
-            mpz_divexact(self.b, self.b, mpz_tmp0)
-            mpz_divexact(self.c, self.c, mpz_tmp0)
-            mpz_mul(mpq_numref(self.a), mpq_numref(self.a), mpz_tmp0)
-            mpq_canonicalize(self.a)
-        mpz_mod(self.c, self.c, self.b)
+        mpz_divexact(self.b, self.b, t0)
 
-    cdef void _c_igcd(self, QuadraticIdeal other):
-        mpz_gcd(mpq_numref(self.a), mpq_numref(self.a), mpq_numref(other.a))
-        mpz_lcm(mpq_denref(self.a), mpq_denref(self.a), mpq_denref(other.a))
-        mpz_gcd(self.b, self.b, other.b)
-        mpz_sub(self.c, self.c, other.c)
-        mpz_gcd(self.b, self.b, self.c)
-        mpz_mod(self.c, other.c, self.b)
+        self._c_reduce(t0)
+        mpz_clear(t0); mpz_clear(t1); mpz_clear(t2)
+
+    cdef void _c_iadd(self, QuadraticIdeal right):
+        # quickly handle when one factor is zero
+        if not right: return
+        if not self:
+            mpq_set(self.a, right.a)
+            mpz_set(self.b, right.b)
+            mpz_set(self.c, right.c)
+            return
+
+        # quickly handle when both ideals are rational
+        if not mpz_cmp_ui(self.b, 1u) and not mpz_cmp_ui(right.b, 1u):
+            mpz_gcd(mpq_numref(self.a), mpq_numref(self.a), \
+                    mpq_numref(right.a))
+            mpz_lcm(mpq_denref(self.a), mpq_denref(self.a), \
+                    mpq_denref(right.a))
+            return
+
+        # Compute the HNF of the integer matrix
+        # [ d*a.n*b w*x.n*y d*a.n*c w*x.n*z ]
+        # [       0       0   d*a.n   w*x.n ]
+        # d = lcm(a.d, x.d)/a.d, w = lcm(a.d, x.d)/x.d
+        cdef mpz_t t0, t1
+        mpz_init(t0); mpz_init(t1)
+
+        if self.is_integral() and right.is_integral():
+            # no work in the case that the ideals are integral
+            mpz_set(t0, mpq_numref(right.a))
+        else:
+            # compute d*a.n and w*x.n
+            mpz_lcm(t0, mpq_denref(self.a), mpq_denref(right.a))
+            mpz_mul(mpq_numref(self.a), mpq_numref(self.a), t0)
+            mpz_divexact(mpq_numref(self.a), mpq_numref(self.a), \
+                    mpq_denref(self.a))
+            mpz_set(mpq_denref(self.a), t0)
+            mpz_divexact(t0, mpq_denref(self.a), mpq_denref(right.a))
+            mpz_mul(t0, t0, mpq_numref(right.a))
+
+        # consolidate first two columns
+        mpz_mul(self.b, self.b, mpq_numref(self.a))
+        mpz_mul(t1, right.b, t0)
+        mpz_gcd(self.b, self.b, t1)
+
+        if not mpz_cmp_ui(self.b, 1u):
+            # can terminate early since a.n must divide this number
+            mpz_set_ui(mpq_numref(self.a), 1u)
+            mpz_set_ui(self.c, 0u)
+
+            mpz_clear(t0); mpz_clear(t1)
+            return
+
+        cdef mpz_t t2, t3
+        mpz_init(t2); mpz_init(t3)
+
+        mpz_sub(t1, self.c, right.c)
+        mpz_mul(t1, t1, mpq_numref(self.a))
+        mpz_mul(self.c, self.c, mpq_numref(self.a))
+
+        mpz_gcdext(mpq_numref(self.a), t2, t3, mpq_numref(self.a), t0)
+
+        mpz_mul(self.c, self.c, t2)
+        mpz_mul(t3, t3, right.c)
+        mpz_addmul(self.c, t3, t0)
+
+        mpz_divexact(t1, t1, mpq_numref(self.a))
+        mpz_mul(t1, t1, t0)
+
+        mpz_gcd(self.b, self.b, t1)
+
+        self._c_reduce(mpq_numref(self.a))
+
+        mpz_clear(t0); mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
 
     cdef int _cmp_c_impl(left, right_py):
         # for quick sorting
@@ -391,10 +545,13 @@ cdef class QuadraticIdeal:
         return mpz_cmp(left.c, right.c)
 
     def __hash__(self):
-        mpq_set(rat_tmp.value, self.a)
-        mpz_set(int_tmp0.value, self.b)
-        mpz_set(int_tmp1.value, self.c)
-        return hash((rat_tmp,int_tmp0,int_tmp1))
+        # TODO: figure out a better hash function
+        cdef Rational a = PY_NEW(Rational)
+        cdef Integer b = PY_NEW(Integer), c = PY_NEW(Integer)
+        mpq_set(a.value, self.a)
+        mpz_set(b.value, self.b)
+        mpz_set(c.value, self.c)
+        return hash((a,b,c))
 
     cpdef QuadraticIdeal __copy__(self):
         cdef QuadraticIdeal res = self._new()
@@ -447,82 +604,28 @@ cdef class QuadraticIdeal:
         return res
 
     cpdef bint is_integral(self):
-        return mpz_cmp_ui(mpq_denref(self.a), 1u) == 0
+        return not mpz_cmp_ui(mpq_denref(self.a), 1u)
 
-    def integral_basis(self):
-        if self._1mod8 or not self._1mod4:
-            return self.gens()
+    def is_one(self):
+        return not (mpz_cmp_ui(self.b, 1u) or mpq_cmp_ui(self.a, 1u, 1u))
 
-        # in the case of 5mod8 we do not use an integral basis internally
-        cdef NumberFieldElement_quadratic x, y
-        x, y = self._new_elt(), self._new_elt()
-
-        # x = self.a*self.b
-        mpz_mul(x.a, mpq_numref(self.a), self.b)
-        mpz_set_ui(x.b, 0u)
-        mpz_set(x.denom, mpq_denref(self.a))
-
-        # y = (self.a/2)*(sqrt(D)+
-        #                   1+2*(((self.b+1)/2)*(self.c-1)%self.b)
-        #                )
-        mpz_set(y.b, mpq_numref(self.a))
-        if mpz_sgn(self.c):
-            mpz_cdiv_q_2exp(y.a, self.b, 1u)
-            mpz_submul(y.a, self.c, y.a)
-            mpz_neg(y.a, y.a)
-            mpz_mod(y.a, y.a, self.b)
-
-            mpz_mul_2exp(y.a, y.a, 1u)
-            mpz_add_ui(y.a, y.a, 1u)
-        else:
-            # in the ramified case, everything simplifies
-            mpz_set(y.a, self.b)
-        mpz_mul(y.a, mpq_numref(self.a), y.a)
-        mpz_set(y.denom, mpq_denref(self.a))
-        mpz_mul_2exp(y.denom, y.denom, 1u)
-        y._reduce_c_()
-
-        return x,y
-
-#    def divides(self, x):
-#        # TODO: add special case for Integer and Rational
-#        cdef QuadraticIdeal other
-##        other = self._parent(x)
-#        other = x
-#
-#        # a*b in me
-#        #
-#        if not mpz_divides_p():
-#            return False
-
-#        if right.gcd%self.gcd: return False
-#        cdef long t = right.gcd/self.gcd
-#        if t*right.n%self.n: return False
-#        if t*(right.r-self.r)%self.n: return False
-#        return True
-
-    def gcd(self, other):
-        cdef QuadraticIdeal res = self.__copy__()
-        res._c_igcd(other)
-        return res
-
-    def factor(self):
+    def factor(self, proof=None):
         # we piggy back off of integer factorization
         cdef QuadraticIdeal tmp
-        cdef Integer p
+        cdef Integer p, z = PY_NEW(Integer)
         cdef dict f_dict = {}
         cdef bint inert
-        mpz_set(int_tmp0.value, self.b)
-        for p, e in int_tmp0.factor():
+        mpz_set(z.value, self.b)
+        for p, e in z.factor(proof=proof):
             tmp = self._new()
             mpq_set_ui(tmp.a, 1u, 1u)
             mpz_set(tmp.b, p.value)
             mpz_mod(tmp.c, self.c, tmp.b)
             f_dict[tmp] = e
-        mpz_set(int_tmp0.value, mpq_numref(self.a))
-        h_factor = dict(int_tmp0.factor())
-        mpz_set(int_tmp0.value, mpq_denref(self.a))
-        for p, e in int_tmp0.factor():
+        mpz_set(z.value, mpq_numref(self.a))
+        h_factor = dict(z.factor(proof=proof))
+        mpz_set(z.value, mpq_denref(self.a))
+        for p, e in z.factor(proof=proof):
             if p in h_factor:
                 h_factor[p] -= e
             else:
@@ -555,7 +658,7 @@ cdef class QuadraticIdeal:
                 mpz_set_ui(tmp.c, mpz_tstbit(self.D.value, 0u))
             else:
                 mpz_sqrtm(tmp.c, self.D.value, tmp.b)
-                if self._1mod8:
+                if self._1mod4:
                     # tmp.c = (-1+tmp.c)/2 (mod tmp.b)
                     if mpz_tstbit(tmp.c, 0u):
                         mpz_tdiv_q_2exp(tmp.c, tmp.c, 1u)
@@ -572,7 +675,7 @@ cdef class QuadraticIdeal:
 
             if not mpz_tstbit(p.value, 0u):
                 # test 2 for ramification seperately
-                if not self._1mod8:
+                if not self._1mod4:
                     f_dict[tmp] += e
                     continue
             elif mpz_divisible_p(self.D.value, p.value):
@@ -584,9 +687,9 @@ cdef class QuadraticIdeal:
             # construct conjugate
             tmp = tmp.__copy__()
             mpz_sub(tmp.c, tmp.b, tmp.c)
-            if tmp._1mod8:
-                mpz_add_ui(tmp.c, tmp.c, 1u)
-                mpz_mod(tmp.c, tmp.c, tmp.b)
+            if tmp._1mod4:
+                # linear coefficient is 1 instead of 0
+                mpz_sub_ui(tmp.c, tmp.c, 1u)
 
             if tmp in f_dict:
                 f_dict[tmp] += e
@@ -607,11 +710,12 @@ cdef class QuadraticIdeal:
         split = mpz_cmp_ui(mpq_numref(self.a), 1u) == 0
         inert = mpz_cmp_ui(self.b, 1u) == 0
         if split and inert:
-            # the case when I = K
+            # the case when I = OK
             return False
         if not (split or inert):
             # both not inert and not split, so not prime
             return False
+        cdef Integer z
         if inert:
             # we are in the case of I=(a), so first check if
             # we have splitting by using the kronecker symbol
@@ -629,13 +733,15 @@ cdef class QuadraticIdeal:
                 return False
 
             # no splitting, so make check to see if a is prime over ZZ
-            mpz_set(int_tmp0.value, mpq_numref(self.a))
+            z = PY_NEW(Integer)
+            mpz_set(z.value, mpq_numref(self.a))
         else: # split/ramified case
-            mpz_set(int_tmp0.value, self.b)
+            z = PY_NEW(Integer)
+            mpz_set(z.value, self.b)
         # we piggy back off of Integer's is_prime
-        return int_tmp0.is_prime(proof=proof)
+        return z.is_prime(proof=proof)
 
-    def gens(self):
+    def integral_basis(self):
         cdef NumberFieldElement_quadratic x, y
         x, y = self._new_elt(), self._new_elt()
 
@@ -645,13 +751,13 @@ cdef class QuadraticIdeal:
         mpz_set(x.denom, mpq_denref(self.a))
         x._reduce_c_()
 
-        if self._1mod8:
+        if self._1mod4:
             # y = self.a*(X+self.c)
             #   = self.a*(sqrt(D)+1+2*self.c)/2
             mpz_mul_2exp(y.a, self.c, 1u)
             mpz_add_ui(y.a, y.a, 1u)
+            mpz_mul(y.a, y.a, mpq_numref(self.a))
             mpz_set(y.b, mpq_numref(self.a))
-            mpz_mul_2exp(y.a, y.a, 1u)
             mpz_mul_2exp(y.denom, mpq_denref(self.a), 1u)
             y._reduce_c_()
         else:
@@ -660,6 +766,8 @@ cdef class QuadraticIdeal:
             mpz_set(y.b, mpq_numref(self.a))
             mpz_set(y.denom, mpq_denref(self.a))
         return x,y
+
+    gens = integral_basis
 
 #    def gen_tuple(self):
 #        try:
@@ -722,3 +830,43 @@ cdef class QuadraticIdeal:
 #                b1, d1 = -b1, -d1
 #            t1 = gcd(b1, c1, d1)
 #            b1 /= t1; c1 /= t1; d1 /= t1
+
+    # methods to be inherited
+    def ring(self):
+        return self._ring
+
+    def __repr__(self):
+        cdef Rational t = PY_NEW(Rational)
+        cdef Integer T = PY_NEW(Integer)
+        mpq_set(t.value, self.a)
+        mpz_set(T.value, self.b)
+        s = '('+T.str() + ', x + '
+        mpz_set(T.value, self.c)
+        return t.str()+s+T.str()+')'
+
+    def __add__(left, right):
+        return left._add_(right)
+
+    def __iadd__(left, right):
+        return left._iadd_(right)
+
+    def __mul__(left, right):
+        return left._mul_(right)
+
+    def __imul__(self, right):
+        return self._imul_(right)
+
+    def __div__(left, right):
+        return left._div_(right)
+
+    def __idiv__(self, right):
+        return self._idiv_(right)
+
+    def __contains__(self, x):
+        return self._contains_(self._ring(x))
+
+    def __cmp__(left, right):
+        return left._cmp_c_impl(right)
+
+    def gcd(self, other):
+        return self + other
