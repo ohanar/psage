@@ -723,15 +723,15 @@ cdef class QuadraticIdeal:
         return Factorization(f_list)
 
     def is_prime(self, proof=None):
-        if not self.is_integral():
+        if not self.is_integral() or self.is_one():
             return False
+        if not self:
+            # zero is prime
+            return True
         # inert primes have b = 1, split/ramified primes have a = 1
         cdef bint inert, split
         split = mpz_cmp_ui(mpq_numref(self.a), 1u) == 0
         inert = mpz_cmp_ui(self.b, 1u) == 0
-        if split and inert:
-            # the case when I = OK
-            return False
         if not (split or inert):
             # both not inert and not split, so not prime
             return False
@@ -743,16 +743,15 @@ cdef class QuadraticIdeal:
                 # even things break the kronecker, so deal
                 # with them separately
                 if mpz_cmp_ui(mpq_numref(self.a), 2u):
-                    # not 2, so done
+                    # not (2), so done
                     return False
-                if self._1mod4 and not self._1mod8:
-                    # D = 5mod8, the only case (2) is prime
-                    return True
-                return False
+                # the only case (2) is prime is when D = 5mod8
+                return self._1mod4 and not self._1mod8
             elif mpz_kronecker(self.D.value, mpq_numref(self.a)) > -1:
                 return False
 
-            # no splitting, so make check to see if a is prime over ZZ
+            # no splitting, so just need to check and
+            # see if a is prime over ZZ
             z = PY_NEW(Integer)
             mpz_set(z.value, mpq_numref(self.a))
         else: # split/ramified case
@@ -891,5 +890,11 @@ cdef class QuadraticIdeal:
     def __richcmp__(left, right, op):
         return (<QuadraticIdeal>left)._richcmp_c_impl(right, op)
 
+    def divides(self, other):
+        return self <= other
+
     def gcd(self, other):
         return self + other
+
+    def is_zero(self):
+        return not self
