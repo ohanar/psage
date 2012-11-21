@@ -63,3 +63,4 @@ cdef class QuadraticIdeal:
     # to inherit
     cpdef bint _contains_(self, x)
     cdef int _cmp_c_impl(left, right)
+    cdef bint _richcmp_c_impl(left, right, int op)

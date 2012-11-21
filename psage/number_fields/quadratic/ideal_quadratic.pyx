@@ -544,6 +544,27 @@ cdef class QuadraticIdeal:
             return res
         return mpz_cmp(left.c, right.c)
 
+    cdef bint _richcmp_c_impl(left, right_py, int op):
+        if op == Py_EQ:
+            return not left._richcmp_c_impl(right_py, Py_NE)
+        if op == Py_LT:
+            return left._richcmp_c_impl(right_py, Py_NE) \
+                    and left._richcmp_c_impl(right_py, Py_LE)
+        if op == Py_GT:
+            return left._richcmp_c_impl(right_py, Py_NE) \
+                    and left._richcmp_c_impl(right_py, Py_GE)
+
+        cdef QuadraticIdeal right = right_py
+        if op == Py_NE:
+            return mpq_cmp(left.a, right.a) or mpz_cmp(left.b, right.b) \
+                    or mpz_cmp(left.c, right.c)
+
+        # probably can be done more quickly
+        if op == Py_LE:
+            return right._div_(left).is_integral()
+        if op == Py_GE:
+            return left._div_(right).is_integral()
+
     def __hash__(self):
         # TODO: figure out a better hash function
         cdef Rational a = PY_NEW(Rational)
@@ -867,6 +888,9 @@ cdef class QuadraticIdeal:
 
     def __cmp__(left, right):
         return left._cmp_c_impl(right)
+
+    def __richcmp__(left, right, op):
+        return (<QuadraticIdeal>left)._richcmp_c_impl(right, op)
 
     def gcd(self, other):
         return self + other
