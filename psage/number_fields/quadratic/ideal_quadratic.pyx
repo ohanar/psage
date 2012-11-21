@@ -635,7 +635,7 @@ cdef class QuadraticIdeal:
         cdef QuadraticIdeal tmp
         cdef Integer p, z = PY_NEW(Integer)
         cdef dict f_dict = {}
-        cdef bint inert
+        cdef int legendre
         mpz_set(z.value, self.b)
         for p, e in z.factor(proof=proof):
             tmp = self._new()
@@ -655,13 +655,17 @@ cdef class QuadraticIdeal:
             # use the legendre symbol to determine whether or not p splits
             if not mpz_tstbit(p.value, 0u):
                 # 2 breaks the legendre symbol, so deal with it separately
-                # 2 is only inert if D is 5mod8
-                inert = self._1mod4 and not self._1mod8
+                if self._1mod8:
+                    legendre = 1
+                elif self._1mod4:
+                    legendre = -1
+                else:
+                    legendre = 0
             else:
-                inert = mpz_legendre(self.D.value, p.value) == -1
+                legendre = mpz_legendre(self.D.value, p.value)
 
             tmp = self._new()
-            if inert:
+            if legendre == -1:
                 # handle inert case
                 mpq_set_z(tmp.a, p.value)
                 mpz_set_ui(tmp.b, 1u)
@@ -694,12 +698,7 @@ cdef class QuadraticIdeal:
             else:
                 f_dict[tmp] = e
 
-            if not mpz_tstbit(p.value, 0u):
-                # test 2 for ramification seperately
-                if not self._1mod4:
-                    f_dict[tmp] += e
-                    continue
-            elif mpz_divisible_p(self.D.value, p.value):
+            if not legendre:
                 # ramified, so we don't have a conjugate
                 # so just double the exponent
                 f_dict[tmp] += e
