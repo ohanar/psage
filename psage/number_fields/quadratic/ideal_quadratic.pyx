@@ -24,6 +24,9 @@ include 'stdsage.pxi'
 
 from sage.rings.number_field.number_field_ideal import NumberFieldIdeal
 
+cdef extern from 'gmp.h':
+    ctypedef __mpz_struct *mpz_ptr
+
 cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
     # p is assumed to be an odd prime
     # b is assumed to have a square root modulo p
@@ -598,7 +601,8 @@ cdef class QuadraticIdeal:
     cpdef bint _contains_(self, x_py):
         cdef NumberFieldElement_quadratic x = x_py
         cdef bint ret
-        cdef mpz_t t0
+        cdef mpz_t t0real
+        cdef mpz_ptr t0 = <mpz_ptr>t0real
 
         if not mpz_sgn(x.b):
             # rational in this case
@@ -629,76 +633,55 @@ cdef class QuadraticIdeal:
 
             mpz_init(t0)
             mpz_mul_2exp(t0, x.b, 1u) # t0 = 2*x.b
-
-            # z = t0/(a*x.denom)
-            # check to see if z is integral, if so compute
-            if not mpz_divisible_p(t0, mpq_numref(self.a)):
-                mpz_clear(t0)
-                return False
-            mpz_init(t1)
-            mpz_divexact(t1, t0, mpq_numref(self.a))
-            mpz_mul(t1, t1, mpq_denref(self.a))
-            if mpz_divisible_p(t1, x.denom):
-                mpz_divexact(t1, t1, x.denom)
-            else:
-                mpz_clear(t0); mpz_clear(t1)
-                return False
-
-            mpz_sub(t0, x.a, x.b) # t0 = x.a-x.b
-            # y = (t0/(a*x.denom) - c*z)/b
-            # check to see if y is integral
-            if not mpz_divisible_p(t0, mpq_numref(self.a)):
-                mpz_clear(t0); mpz_clear(t1)
-                return False
-            mpz_init(t2)
-            mpz_divexact(t2, t0, mpq_numref(self.a))
-            mpz_mul(t2, t2, mpq_denref(self.a))
-            if mpz_divisible_p(t2, x.denom):
-                mpz_divexact(t2, t2, x.denom)
-            else:
-                mpz_clear(t0); mpz_clear(t1); mpz_clear(t2)
-                return False
-            mpz_submul(t2, t1, self.c)
-            ret = mpz_divisible_p(t2, self.b)
-
-            mpz_clear(t0); mpz_clear(t1); mpz_clear(t2)
         else:
             # want to solve
             # [ a*b a*c ] * [ y ] = [ x.a/x.denom ]
             # [   0   a ] * [ z ] = [ x.b/x.denom ]
             # for integers y, z
 
-            # z = x.b/(a*x.denom)
-            # y = (x.a/(a*x.denom) - c*z)/b
-            # some quick checks
-            if not mpz_divisible_p(x.b, mpq_numref(self.a)):
-                return False
-            if not mpz_divisible_p(x.a, mpq_numref(self.a)):
-                return False
+            t0 = <mpz_ptr>x.b
 
-            # check to see if z is integral, if so compute
-            mpz_init(t0)
-            mpz_divexact(t0, x.b, mpq_numref(self.a))
-            mpz_mul(t0, t0, mpq_denref(self.a))
-            if mpz_divisible_p(t0, x.denom):
-                mpz_divexact(t0, t0, x.denom)
-            else:
-                mpz_clear(t0)
-                return False
+        # z = t0/(a*x.denom)
+        # check to see if z is integral, if so compute
+        if not mpz_divisible_p(t0, mpq_numref(self.a)):
+            if self._1mod4: mpz_clear(t0)
+            return False
+        mpz_init(t1)
+        mpz_divexact(t1, t0, mpq_numref(self.a))
+        mpz_mul(t1, t1, mpq_denref(self.a))
+        if mpz_divisible_p(t1, x.denom):
+            mpz_divexact(t1, t1, x.denom)
+        else:
+            if self._1mod4: mpz_clear(t0)
+            mpz_clear(t1)
+            return False
 
-            # check to see if y is integral
-            mpz_init(t1)
-            mpz_divexact(t1, x.a, mpq_numref(self.a))
-            mpz_mul(t1, t1, mpq_denref(self.a))
-            if mpz_divisible_p(t1, x.denom):
-                mpz_divexact(t1, t1, x.denom)
-            else:
-                mpz_clear(t0); mpz_clear(t1)
-                return False
-            mpz_submul(t1, t0, self.c)
-            ret = mpz_divisible_p(t1, self.b)
+        if self._1mod4:
+            mpz_sub(t0, x.a, x.b) # t0 = x.a-x.b
+        else:
+            t0 = <mpz_ptr>x.a
 
-            mpz_clear(t0); mpz_clear(t1)
+        # y = (t0/(a*x.denom) - c*z)/b
+        # check to see if y is integral
+        if not mpz_divisible_p(t0, mpq_numref(self.a)):
+            if self._1mod4: mpz_clear(t0)
+            mpz_clear(t1)
+            return False
+        mpz_init(t2)
+        mpz_divexact(t2, t0, mpq_numref(self.a))
+        mpz_mul(t2, t2, mpq_denref(self.a))
+        if mpz_divisible_p(t2, x.denom):
+            mpz_divexact(t2, t2, x.denom)
+        else:
+            if self._1mod4: mpz_clear(t0)
+            mpz_clear(t1); mpz_clear(t2)
+            return False
+        mpz_submul(t2, t1, self.c)
+        ret = mpz_divisible_p(t2, self.b)
+
+        if self._1mod4: mpz_clear(t0)
+        mpz_clear(t1); mpz_clear(t2)
+
         return ret
 
     cpdef Rational norm(self):
