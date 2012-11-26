@@ -696,6 +696,66 @@ cdef class QuadraticIdeal:
     cpdef bint is_integral(self):
         return not mpz_cmp_ui(mpq_denref(self.a), 1u)
 
+    cpdef bint is_principal(self):
+        try:
+            return self.ring().__class_number == 1
+        except AttributeError:
+            pass
+
+        if not mpz_cmp_ui(self.b, 1u):
+            # rationals are principal
+            return True
+
+        # the ideal is principal if and only if the binary quadratic
+        # form b*x**2+2*c*x*y+(c**2-D)/b*y**2 has minimum 1
+        cdef mpz_t m, n, k, s, t0
+        cdef bint ret
+        cdef short t1
+        mpz_init(m); mpz_init(n); mpz_init(k); mpz_init(s)
+
+        mpz_set(m, self.b)
+        mpz_mul_2exp(n, self.c, 1u)
+        mpz_pow_ui(k, self.c, 2u)
+        mpz_sub(k, k, self.F.value)
+        if self._1mod4:
+            mpz_add_ui(n, n, 1u)
+            mpz_add(k, k, self.c)
+        mpz_divexact(k, k, self.b)
+
+        if mpz_sgn(self.D.value) < 0:
+            if mpz_cmp(m, n) < 0:
+                # normalize the form
+                mpz_add(k, k, m)
+                mpz_sub(k, k, n)
+                mpz_submul_ui(n, m, 2u)
+            mpz_init(t0)
+            while True:
+                # apply reduction until reduced
+                t2 = mpz_cmp(m, k)
+                if t2 < 0 or (mpz_sgn(n) >= 0 and not t2):
+                    break
+                mpz_add(s, k, n)
+                mpz_fdiv_q_2exp(s, s, 1u)
+                mpz_fdiv_q(s, s, k)
+                mpz_pow_ui(t0, s, 2u)
+                mpz_addmul(m, k, t0)
+                mpz_submul(m, n, s)
+                mpz_mul_2exp(t0, s, 1u)
+                mpz_submul(n, t0, k)
+                mpz_neg(n, n)
+                mpz_set(t0, k)
+                mpz_set(k, m)
+                mpz_set(m, t0)
+            mpz_clear(t0)
+
+            ret = not mpz_cmp_ui(m, 1u)
+        else:
+            mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
+            raise NotImplementedError('still need to implement for real quadratic fields')
+
+        mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
+        return ret
+
     def is_one(self):
         return not (mpz_cmp_ui(self.b, 1u) or mpq_cmp_ui(self.a, 1u, 1u))
 
@@ -830,6 +890,9 @@ cdef class QuadraticIdeal:
         return z.is_prime(proof=proof)
 
     def integral_basis(self):
+        return list(self._integral_basis())
+
+    def _integral_basis(self):
         cdef NumberFieldElement_quadratic x, y
         x, y = self._new_elt(), self._new_elt()
 
@@ -855,7 +918,112 @@ cdef class QuadraticIdeal:
             mpz_set(y.denom, mpq_denref(self.a))
         return x,y
 
-    gens = integral_basis
+    def gens(self):
+        try:
+            if self.ring().__class_number > 1:
+                return self._integral_basis()
+        except AttributeError:
+            pass
+
+        cdef NumberFieldElement_quadratic ret
+
+        # quickly handle rational case
+        if not mpz_cmp_ui(self.b, 1u):
+            ret = self._new_elt()
+            mpz_set(ret.a, mpq_numref(self.a))
+            mpz_set_ui(ret.b, 0u)
+            mpz_set(ret.denom, mpq_denref(self.a))
+            return ret,
+
+        # there is a principal generator if and only if there is an integer
+        # solution to b*x**2+2*c*x*y+(c**2-D)/b*y**2 = 1
+        cdef mpz_t m, n, k, s, t0
+        cdef mpz_t M0, M1, M2, M3, M4
+        cdef short t1
+        mpz_init(m); mpz_init(n); mpz_init(k); mpz_init(s)
+        mpz_init(M0); mpz_init(M1); mpz_init(M2); mpz_init(M3)
+
+        mpz_set(m, self.b)
+        mpz_mul_2exp(n, self.c, 1u)
+        mpz_pow_ui(k, self.c, 2u)
+        mpz_sub(k, k, self.F.value)
+        if self._1mod4:
+            mpz_add_ui(n, n, 1u)
+            mpz_add(k, k, self.c)
+        mpz_divexact(k, k, self.b)
+
+        cdef Integer z = PY_NEW(Integer)
+        if mpz_sgn(self.D.value) < 0:
+            mpz_set_ui(M0, 1u)
+            mpz_set_ui(M2, 0u)
+            mpz_set_ui(M3, 1u)
+            if mpz_cmp(m, n) < 0:
+                # normalize the form
+                mpz_add(k, k, m)
+                mpz_sub(k, k, n)
+                mpz_submul_ui(n, m, 2u)
+                mpz_set_si(M1, -1)
+            else:
+                mpz_set_ui(M1, 0u)
+            mpz_init(t0)
+            while True:
+                # apply reduction until reduced
+                t2 = mpz_cmp(m, k)
+                if t2 < 0 or (mpz_sgn(n) >= 0 and not t2):
+                    break
+                mpz_add(s, k, n)
+                mpz_fdiv_q_2exp(s, s, 1u)
+                mpz_fdiv_q(s, s, k)
+                mpz_pow_ui(t0, s, 2u)
+                mpz_addmul(m, k, t0)
+                mpz_submul(m, n, s)
+                mpz_mul_2exp(t0, s, 1u)
+                mpz_submul(n, t0, k)
+                mpz_neg(n, n)
+                mpz_set(t0, k)
+                mpz_set(k, m)
+                mpz_set(m, t0)
+
+                mpz_submul(M0, M1, s)
+                mpz_neg(M0, M0)
+                mpz_set(t0, M0)
+                mpz_set(M0, M1)
+                mpz_set(M1, t0)
+
+                mpz_submul(M2, M3, s)
+                mpz_neg(M2, M2)
+                mpz_set(t0, M2)
+                mpz_set(M2, M3)
+                mpz_set(M3, t0)
+            mpz_clear(t0)
+
+            if not mpz_cmp_ui(m, 1u):
+                ret = self._new_elt()
+                mpz_mul(ret.a, M0, self.b)
+                mpz_addmul(ret.a, M2, self.c)
+                mpz_mul(ret.a, ret.a, mpq_numref(self.a))
+                mpz_mul(ret.b, M2, mpq_numref(self.a))
+                if self._1mod4:
+                    mpz_mul_2exp(ret.a, ret.a, 1u)
+                    mpz_add(ret.a, ret.a, M2)
+                    mpz_mul_2exp(ret.denom, mpq_denref(self.a), 1u)
+                else:
+                    mpz_set(ret.denom, mpq_denref(self.a))
+
+                ret._reduce_c_()
+
+                mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
+                mpz_clear(M0); mpz_clear(M1); mpz_clear(M2); mpz_clear(M3)
+                return ret,
+        else:
+            mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
+            mpz_clear(M0); mpz_clear(M1); mpz_clear(M2); mpz_clear(M3)
+            raise NotImplementedError('still need to implement for real quadratic fields')
+
+        mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
+        mpz_clear(M0); mpz_clear(M1); mpz_clear(M2); mpz_clear(M3)
+
+        return self._integral_basis()
 
 #    def gen_tuple(self):
 #        try:
@@ -971,3 +1139,6 @@ cdef class QuadraticIdeal:
 
     def is_zero(self):
         return not self
+
+    def gen(self, i):
+        return self.gens()[i]
