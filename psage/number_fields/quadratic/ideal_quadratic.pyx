@@ -205,8 +205,8 @@ cdef class QuadraticIdeal:
             # Compute the HNF of
             # [ a-b 2*b*F ]
             # [ 2*b   a+b ]
-            mpz_mul_2exp(self.b, elt.b, 1u)
-            mpz_add(self.c, elt.a, elt.b)
+            mpz_mul_2exp(self.b, elt.b, 1u) # use as temp
+            mpz_add(self.c, elt.a, elt.b) # use as temp
             mpz_gcdext(mpq_numref(self.a), self.b, self.c, self.b, self.c)
             mpz_mul_2exp(self.c, self.c, 1u)
             mpz_sub(t0, elt.a, elt.b)
@@ -294,15 +294,30 @@ cdef class QuadraticIdeal:
         return left
 
     def __pow__(QuadraticIdeal self, long n, dummy):
+        cdef NumberFieldElement_quadratic gen
         cdef QuadraticIdeal res, tmp
+
         if n == 0:
+            # return one ideal
             res = self._new()
             mpq_set_ui(res.a, 1u, 1u)
             mpz_set_ui(res.b, 1u)
             mpz_set_ui(res.c, 0u)
             return res
+
+        if self.is_principal():
+            # if self is principal, it is usually faster to
+            # exponentiate a principal generator
+            gen = self.gen(0)
+            gen **= n
+            res = self._new()
+            res._set_from_elt(gen)
+            return res
+
         if n > 0:
             res = self.__copy__()
+        elif n == -1:
+            return ~self
         else:
             res = ~self
             self = res.__copy__()
@@ -316,7 +331,7 @@ cdef class QuadraticIdeal:
         if n == 3:
             res._c_imul(self)
             return res
-        m = n & 1
+        m = n&1
         n >>= 1
         while not n&1:
             res._c_isq()
@@ -386,6 +401,7 @@ cdef class QuadraticIdeal:
         # We are computing the HNF of
         # [ b*y b*z y*c c*z+D ]
         # [   0   b   y   c+z ]
+        # which has known determinate of b*y
 
         # start by consolidating the 2nd and 3rd columns
         cdef mpz_t t0, t1, t2
@@ -427,7 +443,7 @@ cdef class QuadraticIdeal:
         '''
         This function squares self inplace
         '''
-        # quickly handle when if zero
+        # quickly handle zero
         if not self: return
 
         # the factored out portion can be squared directly
@@ -440,6 +456,7 @@ cdef class QuadraticIdeal:
         # We are computing the HNF of
         # [ b*b b*c c*c+D ]
         # [   0   b   2*c ]
+        # which has known determinate of b*b
 
         # just need to consolidate 2nd and 3rd columns
         cdef mpz_t t0, t1, t2
@@ -462,16 +479,16 @@ cdef class QuadraticIdeal:
         mpz_clear(t0); mpz_clear(t1); mpz_clear(t2)
 
     cdef void _c_iadd(self, QuadraticIdeal right):
-        # quickly handle when one factor is zero
-        if not right: return
-        if not self:
+        # quickly handle when one summand contains the other
+        if self <= right: return
+        if right <= self:
             mpq_set(self.a, right.a)
             mpz_set(self.b, right.b)
             mpz_set(self.c, right.c)
             return
 
         # quickly handle when both ideals are rational
-        if not mpz_cmp_ui(self.b, 1u) and not mpz_cmp_ui(right.b, 1u):
+        if not (mpz_cmp_ui(self.b, 1u) or  mpz_cmp_ui(right.b, 1u)):
             mpz_gcd(mpq_numref(self.a), mpq_numref(self.a), \
                     mpq_numref(right.a))
             mpz_lcm(mpq_denref(self.a), mpq_denref(self.a), \
@@ -763,7 +780,7 @@ cdef class QuadraticIdeal:
         # we piggy back off of integer factorization
         cdef QuadraticIdeal tmp
         cdef Integer p, z = PY_NEW(Integer)
-        cdef dict f_dict = {}
+        cdef dict f_dict = PY_NEW(dict)
         cdef int legendre
         mpz_set(z.value, self.b)
         for p, e in z.factor(proof=proof):
@@ -1024,68 +1041,6 @@ cdef class QuadraticIdeal:
         mpz_clear(M0); mpz_clear(M1); mpz_clear(M2); mpz_clear(M3)
 
         return self._integral_basis()
-
-#    def gen_tuple(self):
-#        try:
-#            return self._gen
-#        except AttributeError:
-#            pass
-#        if not self.r:
-#            self._gen = self.gcd, 0
-#            return self._gen
-#        cdef long Nr = self.r*(self.r+1)-1
-#        if Nr == self.n:
-#            self._gen = std_tuple(self.gcd*self.r, self.gcd)
-#            return self._gen
-#        # find a generator by solving n*x^2+(2*r+1)*x*y+N(r)/n*y^2 == 1
-#        # using the convergents of the continued fractions for -(r+a)/p
-#        # where a is (1+/-sqrt(5))/2
-#        Nr /= self.n
-#        cdef long rg = 2*self.r+1
-#        cdef long p1 = 0, q1 = 1
-#        cdef long p2 = 1, q2 = 0
-#        cdef long p3 = 0, q3 = 1
-#        cdef long p4 = 1, q4 = 0
-#        cdef long b1=-rg,c1=1,d1=2*self.n
-#        cdef long b2=b1,c2=c1,d2=d1
-#        cdef long an
-#        cdef long N1 = self.n*p2*p2
-#        cdef long N2 = N1
-#        cdef long t
-#        while True:
-#            t1 = 5*c1*c1
-#            t2 = sqrt_ceil(t1)
-#            an = (b1+t2)/d1
-#            p2,p1 = p2*an+p1,p2
-#            q2,q1 = q2*an+q1,q2
-#            N = (self.n*p2+rg*q2)*p2+Nr*q2*q2
-#            if N == 1 or N == -1:
-#                self._gen = std_tuple(self.gcd*(p2*self.n+q2*self.r), \
-#                        self.gcd*q2)
-#                return self._gen
-#            b1 -= d1*an
-#            b1, c1, d1 = b1*d1, c1*d1, b1*b1-t1
-#            if d1 < 0:
-#                b1, d1 = -b1, -d1
-#            t1 = gcd(b1, c1, d1)
-#            b1 /= t1; c1 /= t1; d1 /= t1
-#
-#            t1 = 5*c2*c2
-#            t2 = sqrt_ceil(t1)
-#            an = (b2-t2)/d2
-#            p4,p3 = p4*an+p3,p4
-#            q4,q3 = q4*an+q3,q4
-#            N = (self.n*p4+rg*q4)*p4+Nr*q4*q4
-#            if N == 1 or N == -1:
-#                self._gen = std_tuple(self.gcd*(p4*self.n+q4*self.r), \
-#                        self.gcd*q4)
-#                return self._gen
-#            b2 -= d2*an
-#            b2, c2, d2 = b2*d2, c2*d2, b2*b2-t1
-#            if d1 < 0:
-#                b1, d1 = -b1, -d1
-#            t1 = gcd(b1, c1, d1)
-#            b1 /= t1; c1 /= t1; d1 /= t1
 
     # methods to be inherited
     def ring(self):
