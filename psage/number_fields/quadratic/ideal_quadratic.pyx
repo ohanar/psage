@@ -936,12 +936,6 @@ cdef class QuadraticIdeal:
         return x,y
 
     def gens(self):
-        try:
-            if self.ring().__class_number > 1:
-                return self._integral_basis()
-        except AttributeError:
-            pass
-
         cdef NumberFieldElement_quadratic ret
 
         # quickly handle rational case
