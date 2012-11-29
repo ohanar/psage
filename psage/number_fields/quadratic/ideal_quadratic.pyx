@@ -714,14 +714,16 @@ cdef class QuadraticIdeal:
         return not mpz_cmp_ui(mpq_denref(self.a), 1u)
 
     cpdef bint is_principal(self):
-        try:
-            return self.ring().__class_number == 1
-        except AttributeError:
-            pass
-
         if not mpz_cmp_ui(self.b, 1u):
             # rationals are principal
             return True
+
+        cdef dict ring_dict = self._ring.__dict__
+        if '_NumberField_quadratic__class_number' in ring_dict:
+            # the __class_number is a private attribute,
+            # so we have to hack to find it
+            if ring_dict['_NumberField_quadratic__class_number'] == 1:
+                return True
 
         # the ideal is principal if and only if the binary quadratic
         # form b*x**2+2*c*x*y+(c**2-D)/b*y**2 has minimum 1
@@ -773,14 +775,12 @@ cdef class QuadraticIdeal:
             # indefinite form case
 
             # get the floor of the square root of the discriminant
-            try:
-                sqrt_disc = <Integer>self._ring._sqrt_disc
-            except AttributeError:
+            if '_sqrt_disc' not in ring_dict:
                 if self._1mod4:
-                    self._ring._sqrt_disc = self._ring._D.sqrtrem()[0]
+                    ring_dict['_sqrt_disc'] = self.D.sqrtrem()[0]
                 else:
-                    self._ring._sqrt_disc = (4*self._ring._D).sqrtrem()[0]
-                sqrt_disc = <Integer>self._ring._sqrt_disc
+                    ring_dict['_sqrt_disc'] = (4*self.D).sqrtrem()[0]
+            sqrt_disc = <Integer>ring_dict['_sqrt_disc']
 
             # normalize the form if necessary
             if mpz_cmp(m, sqrt_disc.value) >= 0:
@@ -1058,6 +1058,7 @@ cdef class QuadraticIdeal:
         cdef Integer sqrt_disc
         cdef short ts0
         cdef bint is_principal
+        cdef dict ring_dict
         mpz_init(m); mpz_init(n); mpz_init(k); mpz_init(s)
         mpz_init(M0); mpz_init(M1); mpz_init(M2); mpz_init(M3)
         mpz_init(t0)
@@ -1121,14 +1122,13 @@ cdef class QuadraticIdeal:
             # indefinite form case
 
             # get the floor of the square root of the discriminant
-            try:
-                sqrt_disc = <Integer>self._ring._sqrt_disc
-            except AttributeError:
+            ring_dict = self._ring.__dict__
+            if '_sqrt_disc' not in ring_dict:
                 if self._1mod4:
-                    self._ring._sqrt_disc = self._ring._D.sqrtrem()[0]
+                    ring_dict['_sqrt_disc'] = self.D.sqrtrem()[0]
                 else:
-                    self._ring._sqrt_disc = (4*self._ring._D).sqrtrem()[0]
-                sqrt_disc = <Integer>self._ring._sqrt_disc
+                    ring_dict['_sqrt_disc'] = (4*self.D).sqrtrem()[0]
+            sqrt_disc = <Integer>ring_dict['_sqrt_disc']
 
             mpz_set_ui(M0, 1u)
             mpz_set_ui(M2, 0u)
