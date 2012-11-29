@@ -725,10 +725,12 @@ cdef class QuadraticIdeal:
 
         # the ideal is principal if and only if the binary quadratic
         # form b*x**2+2*c*x*y+(c**2-D)/b*y**2 has minimum 1
-        cdef mpz_t m, n, k, s, t0
+        cdef mpz_t m, n, k, s, t0, t1, t2, t3
+        cdef Integer sqrt_disc
         cdef bint ret
-        cdef short t1
+        cdef short ts0
         mpz_init(m); mpz_init(n); mpz_init(k); mpz_init(s)
+        mpz_init(t0)
 
         mpz_set(m, self.b)
         mpz_mul_2exp(n, self.c, 1u)
@@ -740,16 +742,18 @@ cdef class QuadraticIdeal:
         mpz_divexact(k, k, self.b)
 
         if mpz_sgn(self.D.value) < 0:
+            # positive definite form case
+
+            # normalize the form if necessary
             if mpz_cmp(m, n) < 0:
-                # normalize the form
                 mpz_add(k, k, m)
                 mpz_sub(k, k, n)
                 mpz_submul_ui(n, m, 2u)
-            mpz_init(t0)
+
             while True:
                 # apply reduction until reduced
-                t2 = mpz_cmp(m, k)
-                if t2 < 0 or (mpz_sgn(n) >= 0 and not t2):
+                ts0 = mpz_cmp(m, k)
+                if ts0 < 0 or (mpz_sgn(n) >= 0 and not ts0):
                     break
                 mpz_add(s, k, n)
                 mpz_fdiv_q_2exp(s, s, 1u)
@@ -763,13 +767,114 @@ cdef class QuadraticIdeal:
                 mpz_set(t0, k)
                 mpz_set(k, m)
                 mpz_set(m, t0)
-            mpz_clear(t0)
 
             ret = not mpz_cmp_ui(m, 1u)
         else:
-            mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
-            raise NotImplementedError('still need to implement for real quadratic fields')
+            # indefinite form case
 
+            # get the floor of the square root of the discriminant
+            try:
+                sqrt_disc = <Integer>self._ring._sqrt_disc
+            except AttributeError:
+                if self._1mod4:
+                    self._ring._sqrt_disc = self._ring._D.sqrtrem()[0]
+                else:
+                    self._ring._sqrt_disc = (4*self._ring._D).sqrtrem()[0]
+                sqrt_disc = <Integer>self._ring._sqrt_disc
+
+            # normalize the form if necessary
+            if mpz_cmp(m, sqrt_disc.value) >= 0:
+                if mpz_cmp(m, n) < 0:
+                    mpz_add(k, k, m)
+                    mpz_sub(k, k, n)
+                    mpz_submul_ui(n, m, 2u)
+            else:
+                mpz_sub(s, sqrt_disc.value, n)
+                mpz_fdiv_q_2exp(s, s, 1u)
+                mpz_fdiv_q(s, s, m)
+                mpz_pow_ui(t0, s, 2u)
+                mpz_addmul(k, m, t0)
+                mpz_addmul(k, n, s)
+                mpz_mul_2exp(t0, s, 1u)
+                mpz_addmul(n, m, t0)
+
+            while True:
+                # apply reduction until reduced
+                mpz_mul_2exp(t0, m, 1u)
+                if mpz_sgn(t0) < 0:
+                    mpz_neg(t0, t0)
+                mpz_sub(t0, t0, n)
+                if mpz_cmp(t0, sqrt_disc.value) <= 0:
+                    break
+
+                ts0 = mpz_sgn(k)
+                if ts0 < 0:
+                    mpz_neg(t0, k)
+                else:
+                    mpz_set(t0, k)
+                if mpz_cmp(t0, sqrt_disc.value) < 0:
+                    mpz_add(s, sqrt_disc.value, n)
+                else:
+                    mpz_add(s, n, t0)
+                mpz_fdiv_q_2exp(s, s, 1u)
+                mpz_fdiv_q(s, s, t0)
+                if ts0 < 0:
+                    mpz_neg(s, s)
+
+                mpz_pow_ui(t0, s, 2u)
+                mpz_addmul(m, k, t0)
+                mpz_submul(m, n, s)
+                mpz_mul_2exp(t0, s, 1u)
+                mpz_submul(n, t0, k)
+                mpz_neg(n, n)
+                mpz_set(t0, k)
+                mpz_set(k, m)
+                mpz_set(m, t0)
+
+            # indefinite, so make first coefficient positive
+            if mpz_sgn(m) < 0:
+                mpz_neg(m, m)
+                mpz_neg(k, k)
+
+            ret = not mpz_cmp_ui(m, 1u)
+            if not ret:
+                # check to see if the leading coefficient is one
+                # for any other form in the cycle
+                mpz_init(t1); mpz_init(t2); mpz_init(t3)
+                mpz_set(t1, m)
+                mpz_set(t2, n)
+                mpz_set(t3, k)
+                while True:
+                    ts0 = mpz_sgn(t3)
+                    if ts0 < 0:
+                        mpz_neg(t3, t3)
+                    mpz_add(s, t2, sqrt_disc.value)
+                    mpz_fdiv_q_2exp(s, s, 1u)
+                    mpz_fdiv_q(s, s, t3)
+
+                    mpz_pow_ui(t0, s, 2u)
+                    if ts0 < 0:
+                        mpz_submul(t1, t3, t0)
+                    else:
+                        mpz_addmul(t1, t3, t0)
+                    mpz_addmul(t1, t2, s)
+                    mpz_mul_2exp(t0, s, 1u)
+                    mpz_submul(t2, t0, t3)
+                    mpz_neg(t2, t2)
+                    mpz_set(t0, t3)
+                    mpz_neg(t3, t1)
+                    mpz_set(t1, t0)
+
+                    ret = not mpz_cmp_ui(t1, 1u)
+                    if ret or not \
+                            (  mpz_cmp(t1, m) \
+                            or mpz_cmp(t2, n) \
+                            or mpz_cmp(t3, k)):
+                        break
+
+                mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
+
+        mpz_clear(t0)
         mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
         return ret
 
@@ -948,11 +1053,14 @@ cdef class QuadraticIdeal:
 
         # there is a principal generator if and only if there is an integer
         # solution to b*x**2+2*c*x*y+(c**2-D)/b*y**2 = 1
-        cdef mpz_t m, n, k, s, t0
+        cdef mpz_t m, n, k, s, t0, t1, t2, t3, t4
         cdef mpz_t M0, M1, M2, M3, M4
-        cdef short t1
+        cdef Integer sqrt_disc
+        cdef short ts0
+        cdef bint is_principal
         mpz_init(m); mpz_init(n); mpz_init(k); mpz_init(s)
         mpz_init(M0); mpz_init(M1); mpz_init(M2); mpz_init(M3)
+        mpz_init(t0)
 
         mpz_set(m, self.b)
         mpz_mul_2exp(n, self.c, 1u)
@@ -963,24 +1071,27 @@ cdef class QuadraticIdeal:
             mpz_add(k, k, self.c)
         mpz_divexact(k, k, self.b)
 
-        cdef Integer z = PY_NEW(Integer)
         if mpz_sgn(self.D.value) < 0:
+            # positive definite form
+
             mpz_set_ui(M0, 1u)
             mpz_set_ui(M2, 0u)
             mpz_set_ui(M3, 1u)
+
             if mpz_cmp(m, n) < 0:
                 # normalize the form
                 mpz_add(k, k, m)
                 mpz_sub(k, k, n)
                 mpz_submul_ui(n, m, 2u)
+
                 mpz_set_si(M1, -1)
             else:
                 mpz_set_ui(M1, 0u)
-            mpz_init(t0)
+
             while True:
                 # apply reduction until reduced
-                t2 = mpz_cmp(m, k)
-                if t2 < 0 or (mpz_sgn(n) >= 0 and not t2):
+                ts0 = mpz_cmp(m, k)
+                if ts0 < 0 or (mpz_sgn(n) >= 0 and not ts0):
                     break
                 mpz_add(s, k, n)
                 mpz_fdiv_q_2exp(s, s, 1u)
@@ -996,58 +1107,189 @@ cdef class QuadraticIdeal:
                 mpz_set(m, t0)
 
                 mpz_submul(M0, M1, s)
-                mpz_neg(M0, M0)
-                mpz_set(t0, M0)
+                mpz_neg(t0, M0)
                 mpz_set(M0, M1)
                 mpz_set(M1, t0)
 
                 mpz_submul(M2, M3, s)
-                mpz_neg(M2, M2)
-                mpz_set(t0, M2)
+                mpz_neg(t0, M2)
                 mpz_set(M2, M3)
                 mpz_set(M3, t0)
-            mpz_clear(t0)
 
-            if not mpz_cmp_ui(m, 1u):
-                ret = self._new_elt()
-                mpz_mul(ret.a, M0, self.b)
-                mpz_addmul(ret.a, M2, self.c)
-                mpz_mul(ret.a, ret.a, mpq_numref(self.a))
-                mpz_mul(ret.b, M2, mpq_numref(self.a))
-                if self._1mod4:
-                    mpz_mul_2exp(ret.a, ret.a, 1u)
-                    mpz_add(ret.a, ret.a, M2)
-                    mpz_mul_2exp(ret.denom, mpq_denref(self.a), 1u)
-                else:
-                    mpz_set(ret.denom, mpq_denref(self.a))
-
-                ret._reduce_c_()
-
-                mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
-                mpz_clear(M0); mpz_clear(M1); mpz_clear(M2); mpz_clear(M3)
-                return ret,
+            is_principal = not mpz_cmp_ui(m, 1u)
         else:
-            mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
-            mpz_clear(M0); mpz_clear(M1); mpz_clear(M2); mpz_clear(M3)
-            raise NotImplementedError('still need to implement for real quadratic fields')
+            # indefinite form case
+
+            # get the floor of the square root of the discriminant
+            try:
+                sqrt_disc = <Integer>self._ring._sqrt_disc
+            except AttributeError:
+                if self._1mod4:
+                    self._ring._sqrt_disc = self._ring._D.sqrtrem()[0]
+                else:
+                    self._ring._sqrt_disc = (4*self._ring._D).sqrtrem()[0]
+                sqrt_disc = <Integer>self._ring._sqrt_disc
+
+            mpz_set_ui(M0, 1u)
+            mpz_set_ui(M2, 0u)
+            mpz_set_ui(M3, 1u)
+
+            # normalize the form if necessary
+            if mpz_cmp(m, sqrt_disc.value) >= 0:
+                if mpz_cmp(m, n) < 0:
+                    mpz_add(k, k, m)
+                    mpz_sub(k, k, n)
+                    mpz_submul_ui(n, m, 2u)
+
+                    mpz_set_si(M1, -1)
+                else:
+                    mpz_set_ui(M1, 0u)
+            else:
+                mpz_sub(s, sqrt_disc.value, n)
+                mpz_fdiv_q_2exp(s, s, 1u)
+                mpz_fdiv_q(s, s, m)
+                mpz_pow_ui(t0, s, 2u)
+                mpz_addmul(k, m, t0)
+                mpz_addmul(k, n, s)
+                mpz_mul_2exp(t0, s, 1u)
+                mpz_addmul(n, m, t0)
+
+                mpz_set(M1, s)
+
+            while True:
+                # apply reduction until reduced
+                mpz_mul_2exp(t0, m, 1u)
+                if mpz_sgn(t0) < 0:
+                    mpz_neg(t0, t0)
+                mpz_sub(t0, t0, n)
+                if mpz_cmp(t0, sqrt_disc.value) <= 0:
+                    break
+
+                ts0 = mpz_sgn(k)
+                if ts0 < 0:
+                    mpz_neg(t0, k)
+                else:
+                    mpz_set(t0, k)
+                if mpz_cmp(t0, sqrt_disc.value) < 0:
+                    mpz_add(s, sqrt_disc.value, n)
+                else:
+                    mpz_add(s, n, t0)
+                mpz_fdiv_q_2exp(s, s, 1u)
+                mpz_fdiv_q(s, s, t0)
+                if ts0 < 0:
+                    mpz_neg(s, s)
+
+                mpz_pow_ui(t0, s, 2u)
+                mpz_addmul(m, k, t0)
+                mpz_submul(m, n, s)
+                mpz_mul_2exp(t0, s, 1u)
+                mpz_submul(n, t0, k)
+                mpz_neg(n, n)
+                mpz_set(t0, k)
+                mpz_set(k, m)
+                mpz_set(m, t0)
+
+                mpz_submul(M0, M1, s)
+                mpz_neg(t0, M0)
+                mpz_set(M0, M1)
+                mpz_set(M1, t0)
+
+                mpz_submul(M2, M3, s)
+                mpz_neg(t0, M2)
+                mpz_set(M2, M3)
+                mpz_set(M3, t0)
+
+            # indefinite, so make first coefficient positive
+            if mpz_sgn(m) < 0:
+                mpz_neg(m, m)
+                mpz_neg(k, k)
+                mpz_neg(M1, M1)
+                mpz_neg(M3, M3)
+
+            is_principal = not mpz_cmp_ui(m, 1u)
+            if not is_principal:
+                # check to see if the leading coefficient is one
+                # for any other form in the cycle
+                mpz_init(t1); mpz_init(t2); mpz_init(t3)
+                mpz_set(t1, m)
+                mpz_set(t2, n)
+                mpz_set(t3, k)
+                while True:
+                    ts0 = mpz_sgn(t3)
+                    if ts0 < 0:
+                        mpz_neg(t3, t3)
+                    mpz_add(s, t2, sqrt_disc.value)
+                    mpz_fdiv_q_2exp(s, s, 1u)
+                    mpz_fdiv_q(s, s, t3)
+
+                    mpz_pow_ui(t0, s, 2u)
+                    if ts0 < 0:
+                        mpz_submul(t1, t3, t0)
+                    else:
+                        mpz_addmul(t1, t3, t0)
+                    mpz_addmul(t1, t2, s)
+                    mpz_mul_2exp(t0, s, 1u)
+                    mpz_submul(t2, t0, t3)
+                    mpz_neg(t2, t2)
+                    mpz_set(t0, t3)
+                    mpz_neg(t3, t1)
+                    mpz_set(t1, t0)
+
+                    mpz_addmul(M0, M1, s)
+                    mpz_set(t0, M0)
+                    mpz_set(M0, M1)
+                    mpz_set(M1, t0)
+
+                    mpz_addmul(M2, M3, s)
+                    mpz_set(t0, M2)
+                    mpz_set(M2, M3)
+                    mpz_set(M3, t0)
+
+                    is_principal = not mpz_cmp_ui(t1, 1u)
+                    if is_principal or not \
+                            (  mpz_cmp(t1, m) \
+                            or mpz_cmp(t2, n) \
+                            or mpz_cmp(t3, k)):
+                        break
+
+                mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
+
+        if is_principal:
+            ret = self._new_elt()
+            mpz_mul(ret.a, M0, self.b)
+            mpz_addmul(ret.a, M2, self.c)
+            mpz_mul(ret.a, ret.a, mpq_numref(self.a))
+            mpz_mul(ret.b, M2, mpq_numref(self.a))
+            if self._1mod4:
+                mpz_mul_2exp(ret.a, ret.a, 1u)
+                mpz_add(ret.a, ret.a, M2)
+                mpz_mul_2exp(ret.denom, mpq_denref(self.a), 1u)
+            else:
+                mpz_set(ret.denom, mpq_denref(self.a))
+
+            ret._reduce_c_()
+            if mpz_sgn(ret.a) < 0:
+                # not necessary, I prefer when at least one of the
+                # coefficients is positive
+                mpz_neg(ret.a, ret.a)
+                mpz_neg(ret.b, ret.b)
 
         mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
         mpz_clear(M0); mpz_clear(M1); mpz_clear(M2); mpz_clear(M3)
+        mpz_clear(t0)
 
-        return self._integral_basis()
+        if is_principal:
+            return ret,
+        else:
+            return self._integral_basis()
 
     # methods to be inherited
     def ring(self):
         return self._ring
 
     def __repr__(self):
-        cdef Rational t = PY_NEW(Rational)
-        cdef Integer T = PY_NEW(Integer)
-        mpq_set(t.value, self.a)
-        mpz_set(T.value, self.b)
-        s = '('+T.str() + ', x + '
-        mpz_set(T.value, self.c)
-        return t.str()+s+T.str()+')'
+        return 'Quadratic Fractional Ideal (' + \
+                ', '.join([str(g) for g in self.gens()]) + ')'
 
     def __add__(left, right):
         return left._add_(right)
