@@ -160,7 +160,7 @@ ext_modules = [
     Extension("psage.number_fields.quadratic.ideal_quadratic",
               ["psage/number_fields/quadratic/ideal_quadratic.pyx"],
               language = 'c++',
-              libraries = ['gmp']),
+              libraries = ['gmp', 'pari']),
 
     Extension("psage.modform.rational.special_fast",
               ["psage/modform/rational/special_fast.pyx", SAGE_ROOT + "/devel/sage/sage/libs/flint/fmpq_poly.c"],

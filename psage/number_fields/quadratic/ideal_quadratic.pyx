@@ -23,78 +23,43 @@ include 'gmp.pxi'
 include 'stdsage.pxi'
 
 from sage.rings.number_field.number_field_ideal import NumberFieldIdeal
+from sage.libs.pari.gen cimport PariInstance
+from sage.libs.pari.gen import pari
+
+cdef extern from 'pari/pari.h':
+    ctypedef long *GEN
+    GEN   Fp_sqrt(GEN, GEN)
 
 cdef extern from 'gmp.h':
     ctypedef __mpz_struct *mpz_ptr
 
+#cdef extern from 'convert.h':
+#    cdef void t_INT_to_ZZ(mpz_t, GEN)
+
+# libcsage symbol is not being found for some reason
+# so just include code here for now
+cdef extern from 'pari/pari.h':
+    long  signe(GEN)
+    long  lgefint(GEN)
+    long *int_LSW(GEN)
+
+cdef void t_INT_to_ZZ(mpz_t r, GEN g):
+    cdef long limbs = 0
+    limbs = lgefint(g) - 2
+    mpz_realloc2(r, limbs)
+    mpz_import(r, limbs, -1, sizeof(long), 0, 0, int_LSW(g))
+    if signe(g) < 0:
+        mpz_neg(r, r)
+
+cdef PariInstance pari_instance = pari
+
 cdef void mpz_sqrtm(mpz_t r, mpz_t b, mpz_t p):
-    # p is assumed to be an odd prime
-    # b is assumed to have a square root modulo p
-
-    if mpz_divisible_p(b, p):
-        mpz_set_ui(r, 0u)
-        return
-
-    if mpz_tstbit(p, 1u):
-        # 3mod4 case
-        mpz_cdiv_q_2exp(r, p, 2u)
-        mpz_powm(r, b, r, p) # r = b**((p+1)/4)
-        return
-
-    cdef mpz_t t0, t1
-    mpz_init(t0); mpz_init(t1)
-
-    if mpz_tstbit(p, 2u):
-        # 5mod8 case
-        mpz_mul_2exp(r, b, 1u)
-        mpz_tdiv_q_2exp(t0, p, 3u)
-        mpz_powm(t0, r, t0, p) # t0 = (2*b)**((p-5)/8)
-        mpz_powm_ui(t1, t0, 2u, p)
-        mpz_mul(t1, r, t1) # t1 = (2*b)**((p-1)/4)
-        mpz_mul(r, t0, b)
-        mpz_submul(r, r, t1) # r = b*t0*(1-t1)
-        mpz_mod(r, r, p)
-
-        mpz_clear(t0); mpz_clear(t1)
-        return
-
-    cdef mpz_t t2, t3
-    mpz_init(t2); mpz_init(t3)
-
-    if mpz_tstbit(p, 3u):
-        # 9mod16 case
-        mpz_mul_2exp(r, b, 1u)
-        mpz_tdiv_q_2exp(t3, p, 4u)
-        mpz_powm(t0, r, t3, p) # t0 = (2*b)**((p-9)/16)
-        mpz_powm_ui(t1, t0, 2u, p)
-        mpz_mul(t1, r, t1) # t1 = (2*b)**((p-1)/8)
-
-        mpz_powm_ui(t2, t1, 2u, p)
-
-        if not mpz_cmp_ui(t2, 1u):
-            # find a quadratic non-residue
-            mpz_set_ui(r, 2u)
-            while mpz_legendre(r, p) > -1:
-                mpz_add_ui(r, r, 1u)
-
-            # t0 *= r**(p-1)/8
-            # t1 *= r**(p-1)/4
-            mpz_mul_2exp(t3, t3, 1u)
-            mpz_add_ui(t3, t3, 1u)
-            mpz_powm(r, r, t3, p)
-            mpz_mul(t0, t0, r)
-            mpz_powm_ui(r, r, 2u, p)
-            mpz_mul(t1, t1, r)
-
-        mpz_mul(r, t0, b)
-        mpz_submul(r, r, t1) # r = b*t0*(1-t1)
-        mpz_mod(r, r, p)
-
-        mpz_clear(t0); mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
-        return
-
-    # TODO: implement Shanks-Tonelli for 1mod16
-    raise NotImplementedError('Shanks-Tonelli not yet implemented')
+    # wrapper for pari method
+    sig_on()
+    t_INT_to_ZZ(r, Fp_sqrt(
+            pari_instance._new_GEN_from_mpz_t(b),
+            pari_instance._new_GEN_from_mpz_t(p)))
+    pari_instance.clear_stack()
 
 cdef class QuadraticIdeal:
     def __init__(self, *args):
@@ -489,9 +454,9 @@ cdef class QuadraticIdeal:
 
         # quickly handle when both ideals are rational
         if not (mpz_cmp_ui(self.b, 1u) or  mpz_cmp_ui(right.b, 1u)):
-            mpz_gcd(mpq_numref(self.a), mpq_numref(self.a), \
+            mpz_gcd(mpq_numref(self.a), mpq_numref(self.a),
                     mpq_numref(right.a))
-            mpz_lcm(mpq_denref(self.a), mpq_denref(self.a), \
+            mpz_lcm(mpq_denref(self.a), mpq_denref(self.a),
                     mpq_denref(right.a))
             return
 
@@ -509,7 +474,7 @@ cdef class QuadraticIdeal:
             # compute d*a.n and w*x.n
             mpz_lcm(t0, mpq_denref(self.a), mpq_denref(right.a))
             mpz_mul(mpq_numref(self.a), mpq_numref(self.a), t0)
-            mpz_divexact(mpq_numref(self.a), mpq_numref(self.a), \
+            mpz_divexact(mpq_numref(self.a), mpq_numref(self.a),
                     mpq_denref(self.a))
             mpz_set(mpq_denref(self.a), t0)
             mpz_divexact(t0, mpq_denref(self.a), mpq_denref(right.a))
