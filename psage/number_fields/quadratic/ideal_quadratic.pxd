@@ -55,7 +55,6 @@ cdef class QuadraticIdeal:
 
     # most arithmetic is done via the following inplace functions
     cdef void _c_reduce(self, mpz_t)
-    cdef void _c_iinvert(self)
     cdef void _c_imul(self, QuadraticIdeal right)
     cdef void _c_isq(self)
     cdef void _c_iadd(self, QuadraticIdeal right)

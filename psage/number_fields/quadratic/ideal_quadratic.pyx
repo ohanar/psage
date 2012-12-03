@@ -229,36 +229,52 @@ cdef class QuadraticIdeal:
         return mpq_sgn(self.a)
 
     def __invert__(self):
+        if not self:
+            raise ZeroDivisionError('division by zero')
+
         cdef QuadraticIdeal res = self.__copy__()
-        res._c_iinvert()
+
+        sig_on() # probably not needed
+
+        mpq_inv(res.a, res.a)
+        if mpz_cmp_ui(res.b, 1u):
+            # not rational
+            if res._1mod4:
+                # linear coefficient is 1 instead of 0
+                mpz_sub(res.c, res.b, res.c)
+                mpz_sub_ui(res.c, res.c, 1u)
+            elif mpz_sgn(res.c):
+                # there is a non-ramified prime divisor
+                mpz_sub(res.c, res.b, res.c)
+            mpz_mul(mpq_denref(res.a), mpq_denref(res.a), res.b)
+            mpq_canonicalize(res.a)
+
+        sig_off()
+
         return res
 
     def _add_(left, right):
-        return left.__copy__()._iadd_(right)
-
-    def _iadd_(self, right):
-        self._c_iadd(right)
-        return self
+        cdef QuadraticIdeal res = left.__copy__()
+        sig_on()
+        res._c_iadd(right)
+        sig_off()
+        return res
 
     def _mul_(left, right):
-        return left.__copy__()._imul_(right)
-
-    def _imul_(self, right):
-        self._c_imul(right)
-        return self
+        cdef QuadraticIdeal res = left.__copy__()
+        sig_on()
+        res._c_imul(right)
+        sig_off()
+        return res
 
     def _div_(left, right):
         cdef QuadraticIdeal res = ~right
+        sig_on()
         res._c_imul(left)
+        sig_off()
         return res
 
-    def _idiv_(left, right):
-        right._c_iinvert()
-        left._c_mul(right)
-        right._c_iinvert()
-        return left
-
-    def __pow__(QuadraticIdeal self, long n, dummy):
+    def __pow__(self, long n, dummy):
         cdef NumberFieldElement_quadratic gen
         cdef QuadraticIdeal res, tmp
 
@@ -321,25 +337,6 @@ cdef class QuadraticIdeal:
                 mpz_mul(mpq_numref(self.a), mpq_numref(self.a), gcd)
             mpq_canonicalize(self.a)
         mpz_mod(self.c, self.c, self.b)
-
-    cdef void _c_iinvert(self):
-        '''
-        This function inverts self inplace
-        '''
-        if not self:
-            raise ZeroDivisionError('division by zero')
-        mpq_inv(self.a, self.a)
-        if mpz_cmp_ui(self.b, 1u):
-            # not rational
-            if self._1mod4:
-                # linear coefficient is 1 instead of 0
-                mpz_sub(self.c, self.b, self.c)
-                mpz_sub_ui(self.c, self.c, 1u)
-            elif mpz_sgn(self.c):
-                # there is a non-ramified prime divisor
-                mpz_sub(self.c, self.b, self.c)
-            mpz_mul(mpq_denref(self.a), mpq_denref(self.a), self.b)
-            mpq_canonicalize(self.a)
 
     cdef void _c_imul(self, QuadraticIdeal right):
         '''
@@ -1259,20 +1256,11 @@ cdef class QuadraticIdeal:
     def __add__(left, right):
         return left._add_(right)
 
-    def __iadd__(left, right):
-        return left._iadd_(right)
-
     def __mul__(left, right):
         return left._mul_(right)
 
-    def __imul__(self, right):
-        return self._imul_(right)
-
     def __div__(left, right):
         return left._div_(right)
-
-    def __idiv__(self, right):
-        return self._idiv_(right)
 
     def __contains__(self, x):
         try:
