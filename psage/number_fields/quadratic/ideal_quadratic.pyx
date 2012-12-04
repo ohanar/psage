@@ -136,7 +136,7 @@ cdef class QuadraticIdeal:
         mpz_clear(self.b)
         mpz_clear(self.c)
 
-    cdef QuadraticIdeal _new(self):
+    cdef inline QuadraticIdeal _new(self):
         '''
         Constructs a new fractional ideal over self._ring. Be careful
         the ideal doesn't yet have initialized values.
@@ -149,7 +149,7 @@ cdef class QuadraticIdeal:
         res._1mod8 = self._1mod8
         return res
 
-    cdef NumberFieldElement_quadratic _new_elt(self):
+    cdef inline NumberFieldElement_quadratic _new_elt(self):
         '''
         Constructs a new element of self._ring. Be careful, the
         element doesn't yet have initialized values.
@@ -160,12 +160,12 @@ cdef class QuadraticIdeal:
         res.D = self.D
         return res
 
-    cdef void _set_from_elt(self, NumberFieldElement_quadratic elt):
-        mpz_set(mpq_denref(self.a), elt.denom)
-
+    cdef int _set_from_elt(self, NumberFieldElement_quadratic elt) except 1:
         cdef mpz_t t0
         mpz_init(t0)
+        sig_on()
 
+        mpz_set(mpq_denref(self.a), elt.denom)
         if self._1mod4:
             # Compute the HNF of
             # [ a-b 2*b*F ]
@@ -194,8 +194,8 @@ cdef class QuadraticIdeal:
             mpz_neg(self.b, self.b)
         mpz_divexact(self.b, self.b, mpq_numref(self.a))
 
+        sig_off()
         self._c_reduce(mpq_numref(self.a))
-
         mpz_clear(t0)
 
     cdef void _set_from_sage_ideal(self, I):
@@ -234,10 +234,10 @@ cdef class QuadraticIdeal:
 
         cdef QuadraticIdeal res = self.__copy__()
 
-        sig_on() # probably not needed
 
         mpq_inv(res.a, res.a)
         if mpz_cmp_ui(res.b, 1u):
+            sig_on() # probably not needed
             # not rational
             if res._1mod4:
                 # linear coefficient is 1 instead of 0
@@ -248,8 +248,7 @@ cdef class QuadraticIdeal:
                 mpz_sub(res.c, res.b, res.c)
             mpz_mul(mpq_denref(res.a), mpq_denref(res.a), res.b)
             mpq_canonicalize(res.a)
-
-        sig_off()
+            sig_off()
 
         return res
 
@@ -269,12 +268,13 @@ cdef class QuadraticIdeal:
 
     def _div_(left, right):
         cdef QuadraticIdeal res = ~right
-        sig_on()
         res._c_imul(left)
-        sig_off()
         return res
 
-    def __pow__(self, long n, dummy):
+    def __pow__(QuadraticIdeal self, long n, dummy):
+        if dummy is not None:
+            raise ValueError('__pow__ dummy variable not used')
+
         cdef NumberFieldElement_quadratic gen
         cdef QuadraticIdeal res, tmp
 
@@ -286,13 +286,23 @@ cdef class QuadraticIdeal:
             mpz_set_ui(res.c, 0u)
             return res
 
-        if self.is_principal():
-            # if self is principal, it is usually faster to
-            # exponentiate a principal generator
-            gen = self.gen(0)
-            gen **= n
+        if not mpz_cmp_ui(self.b, 1u):
+            # deal with rational ideals seperately
             res = self._new()
-            res._set_from_elt(gen)
+            mpz_set_ui(res.b, 1u)
+            mpz_set_ui(res.c, 0u)
+
+            sig_on()
+
+            if n > 0:
+                mpz_pow_ui(mpq_numref(res.a), mpq_numref(self.a), n)
+                mpz_pow_ui(mpq_denref(res.a), mpq_denref(self.a), n)
+            else:
+                mpz_pow_ui(mpq_denref(res.a), mpq_numref(self.a), -n)
+                mpz_pow_ui(mpq_numref(res.a), mpq_denref(self.a), -n)
+
+            sig_off()
+
             return res
 
         if n > 0:
@@ -306,12 +316,30 @@ cdef class QuadraticIdeal:
         if n == 1:
             return res
 
+        sig_on()
         res._c_isq()
         if n == 2:
+            sig_off()
             return res
         if n == 3:
             res._c_imul(self)
+            sig_off()
             return res
+
+        if n >= 16:
+            sig_off()
+            gens = self.gens()
+            if len(gens) < 2:
+                # if self is principal, it is usually faster to
+                # exponentiate a principal generator
+                gen = gens[0]**n
+                res = self._new()
+                sig_on()
+                res._set_from_elt(gen)
+                sig_off()
+                return res
+            sig_on()
+
         m = n&1
         n >>= 1
         while not n&1:
@@ -327,6 +355,8 @@ cdef class QuadraticIdeal:
             if n&1:
                 res._c_imul(tmp)
             n >>= 1
+
+        sig_off()
         return res
 
     cdef void _c_reduce(self, mpz_t gcd):
@@ -338,27 +368,29 @@ cdef class QuadraticIdeal:
             mpq_canonicalize(self.a)
         mpz_mod(self.c, self.c, self.b)
 
-    cdef void _c_imul(self, QuadraticIdeal right):
+    cdef int _c_imul(self, QuadraticIdeal right) except 1:
         '''
         This function multiplies self by right inplace
         '''
         # quickly handle when one factor is zero
-        if not self: return
+        if not self: return 0
         if not right:
             mpq_set_ui(self.a, 0u, 1u)
             mpz_set_ui(self.b, 1u)
             mpz_set_ui(self.c, 0u)
-            return
+            return 0
 
         # the factored out portion can be multiplied directly
+        sig_on()
         mpq_mul(self.a, self.a, right.a)
+        sig_off()
 
         # quickly handle when one factor is rational
-        if not mpz_cmp_ui(right.b, 1u): return
+        if not mpz_cmp_ui(right.b, 1u): return 0
         if not mpz_cmp_ui(self.b, 1u):
             mpz_set(self.b, right.b)
             mpz_set(self.c, right.c)
-            return
+            return 0
 
         # We are computing the HNF of
         # [ b*y b*z y*c c*z+D ]
@@ -368,6 +400,9 @@ cdef class QuadraticIdeal:
         # start by consolidating the 2nd and 3rd columns
         cdef mpz_t t0, t1, t2
         mpz_init(t0); mpz_init(t1); mpz_init(t2)
+        if not sig_on_no_except():
+            mpz_clear(t0); mpz_clear(t1); mpz_clear(t2)
+            cython_check_exception()
 
         mpz_gcdext(t0, t1, t2, self.b, right.b)
         mpz_mul(t1, t1, self.b)
@@ -379,12 +414,17 @@ cdef class QuadraticIdeal:
         if not mpz_cmp_ui(t0, 1u): # if gcd = 1, we are done
             mpz_mod(self.c, t1, self.b)
 
+            sig_off()
             mpz_clear(t0); mpz_clear(t1); mpz_clear(t2)
-            return
+            return 0
+        sig_off()
 
         # now we need to consolidate the 4th column
         cdef mpz_t t3
         mpz_init(t3)
+        if not sig_on_no_except():
+            mpz_clear(t0); mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
+            cython_check_exception()
 
         mpz_add(t2, self.c, right.c)
         if self._1mod4:
@@ -397,23 +437,25 @@ cdef class QuadraticIdeal:
         mpz_addmul(self.c, t2, t1)
         mpz_divexact(self.b, self.b, t0)
 
+        sig_off()
         self._c_reduce(t0)
-
         mpz_clear(t0); mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
 
-    cdef void _c_isq(self):
+    cdef int _c_isq(self) except 1:
         '''
         This function squares self inplace
         '''
         # quickly handle zero
-        if not self: return
+        if not self: return 0
 
         # the factored out portion can be squared directly
+        sig_on()
         mpz_pow_ui(mpq_numref(self.a), mpq_numref(self.a), 2u)
         mpz_pow_ui(mpq_denref(self.a), mpq_denref(self.a), 2u)
+        sig_off()
 
         # if rational, then we are done
-        if not mpz_cmp_ui(self.b, 1u): return
+        if not mpz_cmp_ui(self.b, 1u): return 0
 
         # We are computing the HNF of
         # [ b*b b*c c*c+D ]
@@ -422,7 +464,10 @@ cdef class QuadraticIdeal:
 
         # just need to consolidate 2nd and 3rd columns
         cdef mpz_t t0, t1, t2
-        mpz_init(t0); mpz_init(t1); mpz_init(t2);
+        mpz_init(t0); mpz_init(t1); mpz_init(t2)
+        if not sig_on_no_except():
+            mpz_init(t0); mpz_init(t1); mpz_init(t2)
+            cython_check_exception()
 
         mpz_mul_2exp(t0, self.c, 1u)
         if self._1mod4:
@@ -437,25 +482,28 @@ cdef class QuadraticIdeal:
         mpz_pow_ui(self.b, self.b, 2u)
         mpz_divexact(self.b, self.b, t0)
 
+        sig_off()
         self._c_reduce(t0)
         mpz_clear(t0); mpz_clear(t1); mpz_clear(t2)
 
-    cdef void _c_iadd(self, QuadraticIdeal right):
+    cdef int _c_iadd(self, QuadraticIdeal right) except 1:
         # quickly handle when one summand contains the other
-        if self <= right: return
+        if self <= right: return 0
         if right <= self:
             mpq_set(self.a, right.a)
             mpz_set(self.b, right.b)
             mpz_set(self.c, right.c)
-            return
+            return 0
 
         # quickly handle when both ideals are rational
         if not (mpz_cmp_ui(self.b, 1u) or  mpz_cmp_ui(right.b, 1u)):
+            sig_on()
             mpz_gcd(mpq_numref(self.a), mpq_numref(self.a),
                     mpq_numref(right.a))
             mpz_lcm(mpq_denref(self.a), mpq_denref(self.a),
                     mpq_denref(right.a))
-            return
+            sig_off()
+            return 0
 
         # Compute the HNF of the integer matrix
         # [ d*a.n*b w*x.n*y d*a.n*c w*x.n*z ]
@@ -463,6 +511,9 @@ cdef class QuadraticIdeal:
         # d = lcm(a.d, x.d)/a.d, w = lcm(a.d, x.d)/x.d
         cdef mpz_t t0, t1
         mpz_init(t0); mpz_init(t1)
+        if not sig_on_no_except():
+            mpz_clear(t0); mpz_clear(t1)
+            cython_check_exception()
 
         if self.is_integral() and right.is_integral():
             # no work in the case that the ideals are integral
@@ -487,11 +538,16 @@ cdef class QuadraticIdeal:
             mpz_set_ui(mpq_numref(self.a), 1u)
             mpz_set_ui(self.c, 0u)
 
+            sig_off()
             mpz_clear(t0); mpz_clear(t1)
-            return
+            return 0
+        sig_off()
 
         cdef mpz_t t2, t3
         mpz_init(t2); mpz_init(t3)
+        if not sig_on_no_except():
+            mpz_clear(t0); mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
+            cython_check_exception()
 
         mpz_sub(t1, self.c, right.c)
         mpz_mul(t1, t1, mpq_numref(self.a))
@@ -508,8 +564,8 @@ cdef class QuadraticIdeal:
 
         mpz_gcd(self.b, self.b, t1)
 
+        sig_off()
         self._c_reduce(mpq_numref(self.a))
-
         mpz_clear(t0); mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
 
     cdef int _cmp_c_impl(left, right_py):
@@ -695,6 +751,10 @@ cdef class QuadraticIdeal:
         cdef short ts0
         mpz_init(m); mpz_init(n); mpz_init(k); mpz_init(s)
         mpz_init(t0)
+        if not sig_on_no_except():
+            mpz_clear(t0)
+            mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
+            cython_check_exception()
 
         mpz_set(m, self.b)
         mpz_mul_2exp(n, self.c, 1u)
@@ -802,7 +862,11 @@ cdef class QuadraticIdeal:
             if not ret:
                 # check to see if the leading coefficient is one
                 # for any other form in the cycle
+                sig_off()
                 mpz_init(t1); mpz_init(t2); mpz_init(t3)
+                if not sig_on_no_except():
+                    mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
+                    cython_check_exception()
                 mpz_set(t1, m)
                 mpz_set(t2, n)
                 mpz_set(t3, k)
@@ -834,8 +898,10 @@ cdef class QuadraticIdeal:
                             or mpz_cmp(t3, k)):
                         break
 
+                sig_off()
                 mpz_clear(t1); mpz_clear(t2); mpz_clear(t3)
 
+        sig_off()
         mpz_clear(t0)
         mpz_clear(m); mpz_clear(n); mpz_clear(k); mpz_clear(s)
         return ret
